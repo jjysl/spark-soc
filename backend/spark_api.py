@@ -4,6 +4,7 @@ SPARK SOC — API Blueprint /spark/*
 Todos os endpoints do dashboard agrupados num Blueprint Flask.
 """
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request
 
@@ -12,6 +13,141 @@ from backend import tickets as ticket_store
 from backend import fortigate, wazuh, ai_proxy, shuffle
 
 spark_bp = Blueprint("spark", __name__)
+
+EXECUTIVE_RANGES = {"1h", "6h", "24h", "7d", "30d"}
+SLA_POLICY_MINUTES = {"P1": 15, "P2": 45, "P3": 90}
+
+
+def _parse_wazuh_timestamp(value: str) -> datetime | None:
+    if not value:
+        return None
+    normalized = value
+    if len(value) > 5 and (value[-5] in {"+", "-"}) and value[-2:].isdigit():
+        normalized = f"{value[:-2]}:{value[-2:]}"
+    try:
+        parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _fmt_minutes(minutes: int) -> str:
+    sign = "-" if minutes < 0 else ""
+    minutes = abs(int(minutes))
+    if minutes < 60:
+        return f"{sign}{minutes} min"
+    hours, rem = divmod(minutes, 60)
+    if hours < 24:
+        return f"{sign}{hours}h {rem:02d}m"
+    days, hours = divmod(hours, 24)
+    return f"{sign}{days}d {hours}h"
+
+
+def _priority_from_level(level: int) -> str:
+    if level >= 12:
+        return "P1"
+    if level >= 7:
+        return "P2"
+    return "P3"
+
+
+def _badge_from_priority(priority: str) -> str:
+    return {"P1": "bp1", "P2": "bp2", "P3": "bp3", "P4": "bp4"}.get(priority, "bp3")
+
+
+def _build_workqueue(alerts: list[dict]) -> tuple[list[dict], dict]:
+    now = datetime.now(timezone.utc)
+    workqueue = []
+    within_sla = 0
+    measurable = 0
+
+    for idx, alert in enumerate(alerts[:25], start=1):
+        level = int(alert.get("level") or 0)
+        priority = _priority_from_level(level)
+        policy_minutes = SLA_POLICY_MINUTES[priority]
+        timestamp = _parse_wazuh_timestamp(alert.get("timestamp", ""))
+        age_minutes = 0
+        remaining_minutes = policy_minutes
+        sla_state = "unknown"
+        if timestamp:
+            measurable += 1
+            age_minutes = max(0, int((now - timestamp).total_seconds() // 60))
+            remaining_minutes = policy_minutes - age_minutes
+            sla_state = "breached" if remaining_minutes < 0 else "at_risk" if remaining_minutes <= max(5, policy_minutes * 0.25) else "within"
+            if remaining_minutes >= 0:
+                within_sla += 1
+
+        status = "SLA Breached" if sla_state == "breached" else "Investigating" if priority in {"P1", "P2"} else "New"
+        fill_pct = max(5, min(100, int((age_minutes / policy_minutes) * 100))) if policy_minutes else 0
+        sla_class = "slbr" if sla_state == "breached" else "slwarn" if sla_state == "at_risk" else "slok"
+        fill_class = "fbr" if sla_state == "breached" else "fwarn" if sla_state == "at_risk" else "fok"
+
+        workqueue.append({
+            "id": f"WAZUH-{str(alert.get('rule_id') or idx).zfill(4)}",
+            "documentId": alert.get("document_id", ""),
+            "index": alert.get("index", ""),
+            "time": (alert.get("timestamp") or "")[11:16] or "--:--",
+            "timestamp": alert.get("timestamp", ""),
+            "description": alert.get("description") or "Wazuh alert",
+            "level": level,
+            "groups": alert.get("groups", []),
+            "agentId": alert.get("agent_id", ""),
+            "agentName": alert.get("agent_name", "unknown"),
+            "agentIp": alert.get("agent_ip", ""),
+            "managerName": alert.get("manager_name", ""),
+            "decoderName": alert.get("decoder_name", ""),
+            "location": alert.get("location", ""),
+            "srcIp": alert.get("src_ip", ""),
+            "dstIp": alert.get("dst_ip", ""),
+            "srcPort": alert.get("src_port", ""),
+            "dstPort": alert.get("dst_port", ""),
+            "tactic": alert.get("mitre_tactic") or "Detection",
+            "technique": alert.get("mitre_technique", ""),
+            "priority": priority,
+            "badge": _badge_from_priority(priority),
+            "analyst": "Unassigned",
+            "sla": _fmt_minutes(remaining_minutes),
+            "slaPolicy": f"{policy_minutes} min",
+            "slaState": sla_state,
+            "slaClass": sla_class,
+            "fillClass": fill_class,
+            "slaPct": fill_pct,
+            "status": status,
+            "statusBadge": "bcrit" if sla_state == "breached" else "binv" if status == "Investigating" else "bnew",
+            "fullLog": alert.get("full_log", ""),
+        })
+
+    sla_compliance = round((within_sla / measurable) * 100, 1) if measurable else None
+    return workqueue, {"measurable": measurable, "within": within_sla, "compliance": sla_compliance}
+
+
+def _build_posture(alert_data: dict, agents: dict, fortigate_data: dict, shuffle_data: dict, sla_summary: dict) -> dict:
+    p1 = int(alert_data.get("p1", 0) or 0)
+    p2 = int(alert_data.get("p2", 0) or 0)
+    total_agents = int(agents.get("total", 0) or 0)
+    active_agents = int(agents.get("active", 0) or 0)
+    agent_ratio = (active_agents / total_agents) if total_agents else 0
+    threat_detection = max(0, min(100, 100 - p1 * 18 - p2 * 5))
+    wazuh_assets = round(agent_ratio * 100) if total_agents else 0
+    fortigate_health = 90 if fortigate_data.get("source") == "fortigate-live" else 35
+    fortigate_health -= 15 if int(fortigate_data.get("mem") or 0) >= 80 else 0
+    fortigate_health -= 15 if int(fortigate_data.get("cpu") or 0) >= 80 else 0
+    shuffle_score = 85 if shuffle_data.get("connected") else 35
+    incident_pressure = max(0, min(100, 100 - p1 * 20 - p2 * 6))
+    sla_score = sla_summary.get("compliance")
+    score = round((threat_detection * 0.30) + (wazuh_assets * 0.20) + (fortigate_health * 0.20) + (shuffle_score * 0.15) + (incident_pressure * 0.15))
+    rows = [
+        {"name": "Threat Detection", "value": threat_detection},
+        {"name": "Wazuh Assets", "value": wazuh_assets},
+        {"name": "FortiGate Health", "value": max(0, fortigate_health)},
+        {"name": "Shuffle SOAR", "value": shuffle_score},
+        {"name": "Incident Pressure", "value": incident_pressure},
+    ]
+    if sla_score is not None:
+        rows.append({"name": "SLA Compliance", "value": sla_score})
+    return {"score": max(0, min(100, score)), "rows": rows}
 
 
 # ── FortiGate Proxy ────────────────────────────────────────────────────────
@@ -72,6 +208,9 @@ def spark_wazuh_debug():
 
 @spark_bp.route("/spark/executive-overview")
 def executive_overview():
+    time_range = request.args.get("range", "24h")
+    if time_range not in EXECUTIVE_RANGES:
+        time_range = "24h"
     errors: dict[str, str] = {}
 
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -81,6 +220,7 @@ def executive_overview():
                 config.INDEXER_BASE,
                 config.INDEXER_USER,
                 config.INDEXER_PASS,
+                time_range,
             ),
             "wazuh_api": executor.submit(
                 wazuh.get_agents_summary,
@@ -121,31 +261,12 @@ def executive_overview():
         errors["shuffle"] = shuffle_data.get("error", "offline")
 
     alerts = alert_data.get("alerts", [])
-    workqueue = []
-    for idx, alert in enumerate(alerts[:10], start=1):
-        level = int(alert.get("level") or 0)
-        priority = "P1" if level >= 12 else "P2" if level >= 7 else "P3"
-        badge = "bp1" if priority == "P1" else "bp2" if priority == "P2" else "bp3"
-        status = "Investigating" if level >= 7 else "New"
-        workqueue.append({
-            "id": f"WAZUH-{str(alert.get('rule_id') or idx).zfill(4)}",
-            "time": (alert.get("timestamp") or "")[11:16] or "--:--",
-            "description": alert.get("description") or "Wazuh alert",
-            "tactic": alert.get("mitre_tactic") or "Detection",
-            "priority": priority,
-            "badge": badge,
-            "analyst": "SOC",
-            "sla": "15 min" if priority == "P1" else "45 min" if priority == "P2" else "90 min",
-            "slaClass": "slbr" if priority == "P1" else "slwarn" if priority == "P2" else "slok",
-            "fillClass": "fbr" if priority == "P1" else "fwarn" if priority == "P2" else "fok",
-            "slaPct": 80 if priority == "P1" else 45 if priority == "P2" else 20,
-            "status": status,
-            "statusBadge": "binv" if status == "Investigating" else "bnew",
-        })
+    workqueue, sla_summary = _build_workqueue(alerts)
+    posture = _build_posture(alert_data, agents, fortigate_data, shuffle_data, sla_summary)
 
     top_alert = alerts[0] if alerts else {}
     triage = (
-        f"Wazuh Indexer: {alert_data.get('total', 0)} alertas nas ultimas 24h. "
+        f"Wazuh Indexer: {alert_data.get('total', 0)} alertas no intervalo {time_range}. "
         f"P1: {alert_data.get('p1', 0)} | P2: {alert_data.get('p2', 0)}. "
         f"FortiGate: CPU {fortigate_data.get('cpu', 0)}%, memoria {fortigate_data.get('mem', 0)}%, "
         f"{fortigate_data.get('sessions', 0)} sessoes ativas."
@@ -155,15 +276,26 @@ def executive_overview():
 
     return jsonify({
         "source": "live",
+        "range": time_range,
         "errors": errors,
         "kpis": {
             "critical_incidents": alert_data.get("p1", 0),
-            "mttd": "live",
-            "mttr": "live",
-            "sla_compliance": 100 if alert_data.get("p1", 0) == 0 else 95,
+            "mttd": "N/A",
+            "mttd_detail": "Aguardando timestamps de incidente",
+            "mttr": "N/A",
+            "mttr_detail": "Aguardando fechamento de tickets",
+            "sla_compliance": sla_summary.get("compliance"),
+            "sla_detail": f"{sla_summary.get('within', 0)}/{sla_summary.get('measurable', 0)} dentro da politica",
+            "sla_target": 95,
             "monitored_assets": agents.get("total", 0),
             "assets_alerting": agents.get("disconnected", 0) + agents.get("pending", 0),
+            "events": alert_data.get("total", 0),
             "events_24h": alert_data.get("total", 0),
+        },
+        "posture": posture,
+        "sla": {
+            "policy_minutes": SLA_POLICY_MINUTES,
+            **sla_summary,
         },
         "wazuh": {
             "alerts": alerts,

@@ -156,22 +156,28 @@ def get_agents_summary(wazuh_base: str, wazuh_user: str, wazuh_pass: str) -> dic
     }
 
 
-def get_executive_alerts(indexer_base: str, user: str, password: str) -> dict:
+def get_executive_alerts(indexer_base: str, user: str, password: str, time_range: str = "24h") -> dict:
+    allowed_ranges = {"1h", "6h", "24h", "7d", "30d"}
+    if time_range not in allowed_ranges:
+        time_range = "24h"
+    interval = "hour" if time_range in {"1h", "6h", "24h"} else "day"
     query = {
-        "size": 50,
+        "size": 100,
         "sort": [{"timestamp": {"order": "desc"}}],
         "_source": [
             "timestamp", "rule.id", "rule.description", "rule.level",
-            "rule.mitre.tactic", "rule.mitre.id", "agent.name", "agent.ip",
-            "data.srcip", "data.dstip", "data.src_ip", "data.dst_ip",
+            "rule.groups", "rule.mitre.tactic", "rule.mitre.id",
+            "agent.id", "agent.name", "agent.ip",
+            "manager.name", "decoder.name", "location", "full_log",
+            "data.srcip", "data.dstip", "data.src_ip", "data.dst_ip", "data.srcport", "data.dstport",
         ],
-        "query": {"range": {"timestamp": {"gte": "now-24h", "lte": "now"}}},
+        "query": {"range": {"timestamp": {"gte": f"now-{time_range}", "lte": "now"}}},
         "aggs": {
             "levels": {"terms": {"field": "rule.level", "size": 20}},
             "hourly": {
                 "date_histogram": {
                     "field": "timestamp",
-                    "calendar_interval": "hour",
+                    "calendar_interval": interval,
                     "min_doc_count": 0,
                 },
                 "aggs": {"levels": {"terms": {"field": "rule.level", "size": 20}}},
@@ -195,20 +201,32 @@ def get_executive_alerts(indexer_base: str, user: str, password: str) -> dict:
         rule = src.get("rule", {})
         agent = src.get("agent", {})
         data = src.get("data", {})
+        manager = src.get("manager", {})
+        decoder = src.get("decoder", {})
         mitre = rule.get("mitre", {})
         tactics = mitre.get("tactic", [])
         techniques = mitre.get("id", [])
         alerts.append({
+            "document_id": hit.get("_id", ""),
+            "index": hit.get("_index", ""),
             "timestamp": src.get("timestamp", ""),
             "rule_id": rule.get("id", ""),
             "description": rule.get("description", ""),
             "level": rule.get("level", 0),
+            "groups": rule.get("groups", []),
+            "agent_id": agent.get("id", ""),
             "agent_name": agent.get("name", "unknown"),
             "agent_ip": agent.get("ip", ""),
+            "manager_name": manager.get("name", ""),
+            "decoder_name": decoder.get("name", ""),
+            "location": src.get("location", ""),
             "src_ip": data.get("srcip") or data.get("src_ip") or agent.get("ip", ""),
             "dst_ip": data.get("dstip") or data.get("dst_ip") or "",
+            "src_port": data.get("srcport", ""),
+            "dst_port": data.get("dstport", ""),
             "mitre_tactic": tactics[0] if tactics else "",
             "mitre_technique": techniques[0] if techniques else "",
+            "full_log": src.get("full_log", ""),
         })
 
     level_buckets = raw.get("aggregations", {}).get("levels", {}).get("buckets", [])
@@ -233,6 +251,8 @@ def get_executive_alerts(indexer_base: str, user: str, password: str) -> dict:
     total = raw.get("hits", {}).get("total", {})
     return {
         "source": "opensearch-live",
+        "range": time_range,
+        "bucket_interval": interval,
         "total": total.get("value", len(alerts)) if isinstance(total, dict) else total,
         "levels": levels,
         "p1": p1,
