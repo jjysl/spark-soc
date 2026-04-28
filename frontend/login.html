@@ -1,98 +1,133 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SPARK SOC - Login</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<title>SPARK SOC - Sign in</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Inter',-apple-system,sans-serif;background:#0d1421;min-height:100vh;display:flex;align-items:center;justify-content:center;color:#fff}
-.bg{position:fixed;inset:0;background:radial-gradient(ellipse at 20% 50%,rgba(218,41,28,.08) 0%,transparent 60%),radial-gradient(ellipse at 80% 20%,rgba(26,86,219,.06) 0%,transparent 50%);pointer-events:none}
-.card{background:#161d2e;border:1px solid #1e2a3d;border-radius:12px;padding:40px;width:100%;max-width:400px;box-shadow:0 24px 64px rgba(0,0,0,.5)}
-.logo{display:flex;align-items:center;gap:12px;margin-bottom:32px;justify-content:center}
-.lmark{width:38px;height:38px;background:#da291c;border-radius:8px;display:flex;align-items:center;justify-content:center}
-.lmark svg{width:22px;height:22px;fill:#fff}
-.lname{font-size:18px;font-weight:600;letter-spacing:-.01em}
-.lsub{font-size:11px;color:#5a7ba5;font-weight:400}
-h2{font-size:15px;font-weight:600;color:#e2e8f0;margin-bottom:6px;text-align:center}
-.sub{font-size:12px;color:#5a7ba5;text-align:center;margin-bottom:28px}
-.field{margin-bottom:16px}
-label{display:block;font-size:11px;font-weight:600;color:#8a9bb0;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
-input{width:100%;background:#0d1421;border:1px solid #1e2a3d;border-radius:6px;padding:10px 14px;color:#e2e8f0;font-size:13px;font-family:'Inter',sans-serif;outline:none;transition:border-color .15s}
-input:focus{border-color:#da291c}
-input::placeholder{color:#3a4a5e}
-.err{background:rgba(218,41,28,.1);border:1px solid rgba(218,41,28,.3);border-radius:6px;padding:10px 14px;font-size:12px;color:#f87171;margin-bottom:16px;display:none}
-.btn-login{width:100%;background:#da291c;color:#fff;border:none;border-radius:6px;padding:11px;font-size:13px;font-weight:600;font-family:'Inter',sans-serif;cursor:pointer;transition:background .15s;margin-top:4px}
-.btn-login:hover{background:#c0241a}
-.btn-login:disabled{background:#4a1a1a;cursor:not-allowed}
+:root{--red:#da291c;--red-dark:#b91f16;--ink:#0f172a;--muted:#64748b;--line:#dce3ec;--panel:#fff;--bg:#eef2f7;--soft:#f8fafc;--green:#10b981}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh;background:var(--bg);color:var(--ink);display:flex;flex-direction:column}
+.topbar{height:64px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 28px;box-shadow:0 1px 4px rgba(15,23,42,.06)}
+.brand{display:flex;align-items:center;gap:12px}
+.mark{width:34px;height:34px;background:var(--red);border-radius:7px;display:flex;align-items:center;justify-content:center;color:#fff}
+.mark svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2}
+.name{font-size:15px;font-weight:700}
+.tagline{font-size:12px;color:var(--muted);margin-top:2px}
+.status{display:flex;align-items:center;gap:8px;color:#475569;font-size:12px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
+.shell{flex:1;display:grid;grid-template-columns:minmax(320px,460px) minmax(420px,1fr);gap:44px;align-items:center;width:min(1120px,100%);margin:0 auto;padding:48px 28px}
+.login-card{background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 18px 44px rgba(15,23,42,.12);padding:30px}
+.eyebrow{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--red);margin-bottom:10px}
+h1{font-size:25px;line-height:1.2;letter-spacing:0;font-weight:700;margin-bottom:8px}
+.sub{font-size:13px;line-height:1.6;color:var(--muted);margin-bottom:24px}
+.field{margin-bottom:15px}
+label{display:block;font-size:11px;font-weight:700;color:#748096;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px}
+input{width:100%;height:42px;background:#fff;border:1px solid #cfd8e3;border-radius:6px;padding:0 12px;color:var(--ink);font-size:13px;font-family:inherit;outline:none;transition:border-color .15s,box-shadow .15s}
+input:focus{border-color:var(--red);box-shadow:0 0 0 3px rgba(218,41,28,.12)}
+input::placeholder{color:#94a3b8}
+.err{display:none;background:#fff5f5;border:1px solid #fecaca;border-radius:6px;padding:10px 12px;font-size:12px;color:#b91c1c;margin-bottom:15px}
+.btn-primary{width:100%;height:42px;background:var(--red);border:1px solid var(--red);border-radius:6px;color:#fff;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;transition:background .15s,border-color .15s;margin-top:4px}
+.btn-primary:hover{background:var(--red-dark);border-color:var(--red-dark)}
+.btn-primary:disabled{background:#cbd5e1;border-color:#cbd5e1;cursor:not-allowed}
 .divider{display:flex;align-items:center;gap:12px;margin:22px 0}
-.divider::before,.divider::after{content:'';flex:1;height:1px;background:#1e2a3d}
-.divider span{font-size:11px;color:#3a4a5e;white-space:nowrap}
-.btn-sso{width:100%;background:#0d1421;border:1px solid #1e2a3d;border-radius:6px;padding:10px 14px;font-size:13px;font-weight:500;font-family:'Inter',sans-serif;color:#e2e8f0;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:border-color .15s,background .15s;margin-bottom:10px;text-decoration:none}
-.btn-sso:hover{border-color:#3a5a8a;background:#111827}
-.btn-sso svg{width:18px;height:18px;flex-shrink:0}
-.hint{font-size:11px;color:#3a4a5e;text-align:center;margin-top:22px;line-height:1.6}
-.hint b{color:#5a7ba5}
+.divider::before,.divider::after{content:'';height:1px;background:var(--line);flex:1}
+.divider span{font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.08em;font-weight:700}
+.sso-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.btn-sso{height:40px;background:#fff;border:1px solid #cfd8e3;border-radius:6px;color:#334155;font-size:13px;font-weight:600;text-decoration:none;display:flex;align-items:center;justify-content:center;gap:8px;transition:border-color .15s,background .15s}
+.btn-sso:hover{border-color:#94a3b8;background:var(--soft)}
+.btn-sso svg{width:17px;height:17px;flex-shrink:0}
+.note{border-top:1px solid var(--line);margin-top:22px;padding-top:16px;font-size:12px;line-height:1.6;color:var(--muted)}
+.side{padding:12px 0}
+.side h2{font-size:34px;line-height:1.12;letter-spacing:0;margin-bottom:18px}
+.side p{font-size:15px;line-height:1.7;color:#475569;max-width:620px}
+.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:28px;max-width:640px}
+.metric{background:#fff;border:1px solid var(--line);border-radius:8px;padding:16px}
+.metric strong{display:block;font-size:22px;color:var(--ink);margin-bottom:4px}
+.metric span{font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;color:#7b8798}
+.footer{height:38px;border-top:1px solid var(--line);background:#fff;color:#64748b;font-size:11px;display:flex;align-items:center;justify-content:center;padding:0 20px}
+@media (max-width:860px){.topbar{padding:0 18px}.status{display:none}.shell{grid-template-columns:1fr;padding:28px 18px}.side{order:-1}.side h2{font-size:28px}.metrics{grid-template-columns:1fr}.login-card{padding:24px}}
 </style>
 </head>
 <body>
-<div class="bg"></div>
-<div class="card">
-  <div class="logo">
-    <div class="lmark">
-      <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+<header class="topbar">
+  <div class="brand">
+    <div class="mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.5 2.9 8.2 7 10 4.1-1.8 7-5.5 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-5"/></svg>
     </div>
     <div>
-      <div class="lname">SPARK SOC</div>
-      <div class="lsub">NG-SOC as a Service - Fortinet</div>
+      <div class="name">SPARK SOC</div>
+      <div class="tagline">NG-SOC as a Service - powered by Fortinet</div>
     </div>
   </div>
-  <h2>Acesso ao Painel</h2>
-  <p class="sub">Entre com suas credenciais para continuar</p>
-  <div class="err" id="errMsg"></div>
-  <form id="loginForm">
-    <div class="field">
-      <label for="username">Usuario</label>
-      <input type="text" id="username" placeholder="usuario" autocomplete="username" required>
+  <div class="status"><span class="dot"></span> Secure analyst workspace</div>
+</header>
+
+<main class="shell">
+  <section class="login-card" aria-label="Sign in">
+    <div class="eyebrow">Identity Access</div>
+    <h1>Sign in to SPARK SOC</h1>
+    <p class="sub">Use your assigned analyst account or enterprise SSO to access the SOC workspace.</p>
+
+    <div class="err" id="errMsg"></div>
+    <form id="loginForm">
+      <div class="field">
+        <label for="username">Username</label>
+        <input type="text" id="username" placeholder="admin" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" placeholder="Enter password" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn-primary" id="btnLogin">Sign in</button>
+    </form>
+
+    <div class="divider"><span>SSO</span></div>
+    <div class="sso-grid">
+      <a href="/auth/microsoft" class="btn-sso">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <rect x="1" y="1" width="10" height="10" fill="#f25022"/>
+          <rect x="13" y="1" width="10" height="10" fill="#7fba00"/>
+          <rect x="1" y="13" width="10" height="10" fill="#00a4ef"/>
+          <rect x="13" y="13" width="10" height="10" fill="#ffb900"/>
+        </svg>
+        Microsoft
+      </a>
+      <a href="/auth/google" class="btn-sso">
+        <svg viewBox="0 0 24 24">
+          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+        </svg>
+        Google
+      </a>
     </div>
-    <div class="field">
-      <label for="password">Senha</label>
-      <input type="password" id="password" placeholder="********" autocomplete="current-password" required>
+
+    <p class="note">Local lab accounts are configured server-side in <strong>config.py</strong>. Do not expose passwords in the UI or commit real credentials.</p>
+  </section>
+
+  <section class="side">
+    <h2>Executive visibility for live SOC operations.</h2>
+    <p>SPARK SOC consolidates Wazuh, FortiGate and Shuffle telemetry into a single analyst workspace with live service workqueue, alert triage and incident response workflows.</p>
+    <div class="metrics">
+      <div class="metric"><strong>Wazuh</strong><span>Detection telemetry</span></div>
+      <div class="metric"><strong>FortiGate</strong><span>Network controls</span></div>
+      <div class="metric"><strong>Shuffle</strong><span>SOAR automation</span></div>
     </div>
-    <button type="submit" class="btn-login" id="btnLogin">Entrar</button>
-  </form>
-  <div class="divider"><span>ou continue com</span></div>
-  <a href="/auth/microsoft" class="btn-sso">
-    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-      <rect x="1" y="1" width="10" height="10" fill="#f25022"/>
-      <rect x="13" y="1" width="10" height="10" fill="#7fba00"/>
-      <rect x="1" y="13" width="10" height="10" fill="#00a4ef"/>
-      <rect x="13" y="13" width="10" height="10" fill="#ffb900"/>
-    </svg>
-    Entrar com Microsoft
-  </a>
-  <a href="/auth/google" class="btn-sso">
-    <svg viewBox="0 0 24 24">
-      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
-      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-    </svg>
-    Entrar com Google
-  </a>
-  <div class="hint">
-    Usuarios padrao: <b>admin</b> / <b>analista</b> / <b>viewer</b><br>
-    Senhas: Admin@2026 - Spark@2026 - Viewer@2026
-  </div>
-</div>
+  </section>
+</main>
+
+<footer class="footer">SPARK SOC - FIAP / Fortinet Challenge 2025</footer>
+
 <script>
 document.getElementById('loginForm').addEventListener('submit', async (event) => {
   event.preventDefault();
   const button = document.getElementById('btnLogin');
   const errorBox = document.getElementById('errMsg');
   button.disabled = true;
-  button.textContent = 'Verificando...';
+  button.textContent = 'Signing in...';
   errorBox.style.display = 'none';
 
   try {
@@ -106,13 +141,13 @@ document.getElementById('loginForm').addEventListener('submit', async (event) =>
       })
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Falha no login');
+    if (!response.ok) throw new Error(data.error || 'Authentication failed');
     window.location.href = '/';
   } catch (error) {
     errorBox.textContent = error.message;
     errorBox.style.display = 'block';
     button.disabled = false;
-    button.textContent = 'Entrar';
+    button.textContent = 'Sign in';
   }
 });
 </script>
