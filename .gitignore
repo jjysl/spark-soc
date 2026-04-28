@@ -1,6 +1,5 @@
 config.py
 .env
-docs/CODEX_CONTEXT.md
 
 events.db
 data/*.db
