@@ -617,6 +617,7 @@ def executive_overview():
     alerts = alert_data.get("alerts", [])
     promoted_cases = ticket_store.promote_alerts_to_cases(alerts, SLA_POLICY_MINUTES) if alerts else []
     case_records = ticket_store.list_incident_cases(limit=25)
+    lifecycle_metrics = ticket_store.get_incident_lifecycle_metrics()
     workqueue, sla_summary = _build_workqueue(case_records)
     posture = _build_posture(alert_data, agents, fortigate_data, shuffle_data, sla_summary)
 
@@ -637,10 +638,10 @@ def executive_overview():
         "errors": errors,
         "kpis": {
             "critical_incidents": alert_data.get("p1", 0),
-            "mttd": "live",
-            "mttd_detail": f"{len(promoted_cases)} alert candidates promoted to case lifecycle",
-            "mttr": "N/A",
-            "mttr_detail": "No closed case lifecycle records yet",
+            "mttd": lifecycle_metrics.get("mttd", "N/A"),
+            "mttd_detail": lifecycle_metrics.get("mttd_detail", ""),
+            "mttr": lifecycle_metrics.get("mttr", "N/A"),
+            "mttr_detail": lifecycle_metrics.get("mttr_detail", ""),
             "sla_compliance": sla_summary.get("compliance"),
             "sla_detail": f"{sla_summary.get('within', 0)}/{sla_summary.get('measurable', 0)} within escalation policy",
             "sla_target": 95,
@@ -667,6 +668,8 @@ def executive_overview():
         "case_lifecycle": {
             "promoted": len(promoted_cases),
             "open_cases": len(case_records),
+            "total_cases": lifecycle_metrics.get("total_cases", 0),
+            "closed_cases": lifecycle_metrics.get("closed_cases", 0),
             "model": "alert -> candidate -> case/workqueue -> owner/status/SLA",
         },
     }

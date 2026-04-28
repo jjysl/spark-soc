@@ -119,6 +119,7 @@
     const [priority, setPriority] = useState('all');
     const [detailTab, setDetailTab] = useState('table');
     const [fieldFilters, setFieldFilters] = useState([]);
+    const [actionState, setActionState] = useState('');
     const normalizedQuery = query.trim().toLowerCase();
     const filteredItems = items.filter(item => {
       const matchesPriority = priority === 'all' || item.priority === priority;
@@ -161,6 +162,7 @@
     function renderDetails(item) {
       function updateCase(patch) {
         if (!item.caseId) return;
+        setActionState(`Updating ${item.caseId}...`);
         fetch(`/spark/incident-cases/${encodeURIComponent(item.caseId)}`, {
           method: 'PUT',
           headers: {'Content-Type': 'application/json'},
@@ -169,12 +171,19 @@
         }).then(response => {
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           return response.json();
-        }).then(() => onCaseUpdate && onCaseUpdate()).catch(console.error);
+        }).then(updated => {
+          setActionState(`${updated.case_id || item.caseId} updated`);
+          onCaseUpdate && onCaseUpdate();
+        }).catch(error => {
+          setActionState(`Update failed: ${error.message}`);
+          console.error(error);
+        });
       }
-      const actions = h('div', {style: {display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12}},
-        h('button', {className: 'detail-filter', onClick: () => updateCase({status: 'investigating'})}, 'Mark investigating'),
-        h('button', {className: 'detail-filter', onClick: () => updateCase({owner: 'SOC Analyst'})}, 'Assign to SOC Analyst'),
-        h('button', {className: 'detail-filter', onClick: () => updateCase({status: 'closed'})}, 'Close case')
+      const actions = h('div', {style: {display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12}},
+        h('button', {className: 'btn', onClick: event => { event.stopPropagation(); updateCase({status: 'investigating'}); }}, 'Start Investigation'),
+        h('button', {className: 'btn', onClick: event => { event.stopPropagation(); updateCase({owner: 'SOC Analyst'}); }}, 'Assign Owner'),
+        h('button', {className: 'btn btnp', onClick: event => { event.stopPropagation(); updateCase({status: 'closed'}); }}, 'Close Case'),
+        actionState ? h('span', {style: {fontSize: 11, color: 'var(--tm)'}}, actionState) : null
       );
       if (detailTab === 'json') {
         return h(React.Fragment, null, actions, h('pre', {className: 'detail-log'}, JSON.stringify(item, null, 2)));
@@ -409,6 +418,7 @@
     const [updatedAt, setUpdatedAt] = useState(null);
     const [range, setRange] = useState('24h');
     const [loading, setLoading] = useState(false);
+    const [message, setMessage] = useState('');
 
     async function load(selectedRange = range, refresh = false) {
       setLoading(true);
@@ -433,6 +443,58 @@
       return () => clearInterval(timer);
     }, [range]);
 
+    function exportReport() {
+      const report = {
+        generated_at: new Date().toISOString(),
+        range,
+        kpis: data?.kpis || {},
+        case_lifecycle: data?.case_lifecycle || {},
+        source_status: data?.errors || {},
+        workqueue: data?.workqueue || [],
+      };
+      const blob = new Blob([JSON.stringify(report, null, 2)], {type: 'application/json'});
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `spark-soc-executive-${range}-${Date.now()}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setMessage('Executive report exported as JSON.');
+    }
+
+    async function openServiceRequest() {
+      const topCase = workqueue[0];
+      if (!topCase) {
+        setMessage('No open case available for service request.');
+        return;
+      }
+      setMessage('Creating service request...');
+      try {
+        const response = await fetch('/spark/tickets', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          credentials: 'include',
+          body: JSON.stringify({
+            title: `Service request for ${topCase.id}: ${topCase.description}`,
+            priority: String(topCase.priority || 'P3').toLowerCase(),
+            type: 'incident',
+            assignee: topCase.analyst === 'Unassigned' ? 'SOC' : topCase.analyst,
+            incidentLink: topCase.id,
+            mitre: topCase.tactic || '',
+            ip: topCase.srcIp || topCase.agentIp || '',
+            desc: `Opened from Executive Overview workqueue case ${topCase.id}. SLA: ${topCase.sla}. Status: ${topCase.status}.`,
+          }),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const ticket = await response.json();
+        setMessage(`Service request ${ticket.id} created.`);
+      } catch (error) {
+        setMessage(`Service request failed: ${error.message}`);
+      }
+    }
+
     const kpis = data?.kpis || {};
     const fortigate = data?.fortigate || {};
     const workqueue = data?.workqueue || [];
@@ -453,18 +515,22 @@
           h('div', {className: 'ptitle'}, 'Executive Overview'),
           h('div', {className: 'psub'}, h('span', {className: 'ldot'}), loading ? `Updating ${range} telemetry...` : updatedAt ? `Live - updated ${updatedAt.toLocaleTimeString('en-US')}` : 'Syncing live sources...')
         ),
-        h('div', {className: 'ha'}, h(TimeSelector, {value: range, onChange: setRange}), h('button', {className: 'btn'}, 'Export Report'), h('button', {className: 'btn btnp'}, 'Open Service Request'))
+        h('div', {className: 'ha'},
+          h(TimeSelector, {value: range, onChange: setRange}),
+          h('button', {className: 'btn', onClick: exportReport}, 'Export Report'),
+          h('button', {className: 'btn btnp', onClick: openServiceRequest}, 'Open Service Request')
+        )
       ),
       h('div', {className: 'krow'},
         h(KpiCard, {label: 'P1 - Critical Incidents', value: fmtNum(kpis.critical_incidents), detail: `<span class="up">${fmtNum(kpis.events ?? kpis.events_24h)}</span> alerts ${data?.range || range}`, critical: true}),
         h(KpiCard, {label: 'MTTD', value: kpis.mttd || 'N/A', detail: `<span class="dn">${kpis.mttd_detail || 'Incident lifecycle unavailable'}</span>`}),
-        h(KpiCard, {label: 'MTTR', value: kpis.mttr || 'N/A', detail: status.shuffle ? `<span class="dn">${kpis.mttr_detail || 'Waiting for resolved tickets'}</span>` : '<span class="up">Shuffle parcial</span>'}),
+        h(KpiCard, {label: 'MTTR', value: kpis.mttr || 'N/A', detail: status.shuffle ? `<span class="dn">${kpis.mttr_detail || 'Waiting for resolved tickets'}</span>` : '<span class="up">Shuffle partial</span>'}),
         h(KpiCard, {label: 'SLA Compliance', value: kpis.sla_compliance == null ? 'N/A' : `${kpis.sla_compliance}%`, detail: `<span class="dn">${kpis.sla_detail || 'No measurable alerts'} - target ${kpis.sla_target || 95}%</span>`, tone: 'green'}),
         h(KpiCard, {label: 'Monitored Assets', value: fmtNum(kpis.monitored_assets), detail: `<span class="up">${fmtNum(kpis.assets_alerting)}</span> in alert state`})
       ),
       h('div', {className: 'aibox'},
         h('strong', null, 'SPARK Live Triage: '),
-        error ? `update error (${error}). Keeping last state.` : (data?.triage || 'Loading live telemetry...')
+        message ? message : error ? `update error (${error}). Keeping last state.` : (data?.triage || 'Loading live telemetry...')
       ),
       h('div', {className: 'source-strip'},
         h(SourceBadge, {label: 'Wazuh', ok: status.wazuh}),

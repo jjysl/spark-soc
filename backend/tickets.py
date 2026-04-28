@@ -74,6 +74,19 @@ def _parse_iso(value: str | None) -> datetime | None:
         return None
 
 
+def _fmt_duration(seconds: float | int | None) -> str:
+    if seconds is None:
+        return "N/A"
+    minutes = max(0, int(seconds // 60))
+    if minutes < 60:
+        return f"{minutes}m"
+    hours, rem = divmod(minutes, 60)
+    if hours < 24:
+        return f"{hours}h {rem:02d}m"
+    days, hours = divmod(hours, 24)
+    return f"{days}d {hours}h"
+
+
 def _next_id() -> str:
     nums = [int(k.split("-")[1]) for k in _tickets if k.startswith("SPARK-") and k.split("-")[1].isdigit()]
     return f"SPARK-{max(nums, default=0) + 1:03d}"
@@ -372,3 +385,56 @@ def update_incident_case(case_id: str, data: dict) -> dict | None:
     row = conn.execute("SELECT * FROM incident_cases WHERE case_id = ?", (case_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+def get_incident_lifecycle_metrics() -> dict:
+    init_case_store()
+    conn = _db()
+    rows = conn.execute("SELECT * FROM incident_cases").fetchall()
+    conn.close()
+
+    detection_deltas = []
+    response_deltas = []
+    resolution_deltas = []
+    total = len(rows)
+    open_cases = 0
+    closed_cases = 0
+
+    for row in rows:
+        item = dict(row)
+        alert_ts = _parse_iso(item.get("alert_timestamp"))
+        created_at = _parse_iso(item.get("created_at"))
+        acknowledged_at = _parse_iso(item.get("acknowledged_at"))
+        closed_at = _parse_iso(item.get("closed_at"))
+        if item.get("status") == "closed":
+            closed_cases += 1
+        else:
+            open_cases += 1
+        if alert_ts and created_at:
+            detection_deltas.append((created_at - alert_ts).total_seconds())
+        if created_at and acknowledged_at:
+            response_deltas.append((acknowledged_at - created_at).total_seconds())
+        if created_at and closed_at:
+            resolution_deltas.append((closed_at - created_at).total_seconds())
+
+    def avg(values: list[float]) -> float | None:
+        return sum(values) / len(values) if values else None
+
+    mttd = avg(detection_deltas)
+    mttr_response = avg(response_deltas)
+    mttr_resolution = avg(resolution_deltas)
+    return {
+        "total_cases": total,
+        "open_cases": open_cases,
+        "closed_cases": closed_cases,
+        "mttd": _fmt_duration(mttd),
+        "mttd_detail": f"{len(detection_deltas)} cases with alert-to-case timestamps" if detection_deltas else "No alert-to-case timestamps yet",
+        "mttr": _fmt_duration(mttr_resolution) if resolution_deltas else _fmt_duration(mttr_response),
+        "mttr_detail": (
+            f"{len(resolution_deltas)} closed cases measured"
+            if resolution_deltas
+            else f"{len(response_deltas)} acknowledged cases measured"
+            if response_deltas
+            else "No acknowledged or closed cases yet"
+        ),
+    }
