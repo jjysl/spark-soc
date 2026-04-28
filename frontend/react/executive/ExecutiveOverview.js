@@ -192,11 +192,13 @@
         actionState ? h('span', {style: {fontSize: 11, color: 'var(--tm)'}}, actionState) : null
       );
       if (detailTab === 'json') {
-        return h(React.Fragment, null, actions, h('pre', {className: 'detail-log'}, JSON.stringify(item, null, 2)));
+        const raw = item.rawEvent && Object.keys(item.rawEvent).length ? item.rawEvent : item;
+        return h(React.Fragment, null, actions, h('pre', {className: 'detail-log'}, JSON.stringify(raw, null, 2)));
       }
       if (detailTab === 'rule') {
         return h(React.Fragment, null, actions, h('div', {className: 'alert-detail'},
-          h(DetailCell, {label: 'Rule ID', value: item.id, onFilter: addFieldFilter}),
+          h(DetailCell, {label: 'Case ID', value: item.id, onFilter: addFieldFilter}),
+          h(DetailCell, {label: 'Wazuh Rule ID', value: item.rawEvent?.rule?.id || item.id, onFilter: addFieldFilter}),
           h(DetailCell, {label: 'Rule Level', value: item.level, onFilter: addFieldFilter}),
           h(DetailCell, {label: 'Groups', value: Array.isArray(item.groups) ? item.groups.join(', ') : item.groups, onFilter: addFieldFilter}),
           h(DetailCell, {label: 'Decoder', value: item.decoderName, onFilter: addFieldFilter}),
@@ -208,7 +210,7 @@
         ));
       }
       return h(React.Fragment, null, actions, h('div', {className: 'alert-detail'},
-        h(DetailCell, {label: 'Rule / Level', value: `${item.id} / level ${item.level}`, onFilter: () => addFieldFilter('Rule', item.id)}),
+        h(DetailCell, {label: 'Case / Rule', value: `${item.id} / ${item.rawEvent?.rule?.id || '-'} level ${item.level || '-'}`, onFilter: () => addFieldFilter('Rule', item.rawEvent?.rule?.id || item.id)}),
         h(DetailCell, {label: 'Agent', value: `${item.agentName || '-'} (${item.agentIp || item.agentId || '-'})`, onFilter: () => addFieldFilter('Agent', item.agentName || item.agentIp || item.agentId)}),
         h(DetailCell, {label: 'Source -> Destination', value: `${item.srcIp || '-'}${item.srcPort ? ':' + item.srcPort : ''} -> ${item.dstIp || '-'}${item.dstPort ? ':' + item.dstPort : ''}`}),
         h(DetailCell, {label: 'MITRE', value: `${item.tactic || '-'} ${item.technique || ''}`.trim(), onFilter: () => addFieldFilter('MITRE', item.technique || item.tactic)}),
@@ -290,7 +292,11 @@
                 h('td', {colSpan: 8},
                   h('div', null,
                     h('div', {className: 'detail-tabs'},
-                      ['table', 'json', 'rule'].map(tab =>
+                      [
+                        ['table', 'Evidence'],
+                        ['rule', 'Rule'],
+                        ['json', 'Raw JSON'],
+                      ].map(([tab, label]) =>
                         h('button', {
                           key: tab,
                           className: detailTab === tab ? 'active' : '',
@@ -298,7 +304,7 @@
                             event.stopPropagation();
                             setDetailTab(tab);
                           },
-                        }, tab.toUpperCase())
+                        }, label)
                       )
                     ),
                     renderDetails(item)

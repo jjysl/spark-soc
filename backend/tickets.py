@@ -1,6 +1,7 @@
 """SPARK SOC ticket, block-list and incident lifecycle store."""
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
@@ -29,6 +30,8 @@ def init_case_store() -> None:
             source_alert_id TEXT UNIQUE,
             source_index TEXT,
             rule_id TEXT,
+            rule_level INTEGER,
+            rule_groups TEXT,
             title TEXT NOT NULL,
             priority TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'new',
@@ -41,15 +44,37 @@ def init_case_store() -> None:
             acknowledged_at TEXT,
             closed_at TEXT,
             agent_name TEXT,
+            agent_id TEXT,
             agent_ip TEXT,
+            manager_name TEXT,
+            decoder_name TEXT,
+            location TEXT,
             src_ip TEXT,
             dst_ip TEXT,
+            src_port TEXT,
+            dst_port TEXT,
             mitre_tactic TEXT,
             mitre_technique TEXT,
-            raw_summary TEXT
+            raw_summary TEXT,
+            raw_json TEXT
         )
         """
     )
+    existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(incident_cases)").fetchall()}
+    migrations = {
+        "rule_level": "INTEGER",
+        "rule_groups": "TEXT",
+        "agent_id": "TEXT",
+        "manager_name": "TEXT",
+        "decoder_name": "TEXT",
+        "location": "TEXT",
+        "src_port": "TEXT",
+        "dst_port": "TEXT",
+        "raw_json": "TEXT",
+    }
+    for column, definition in migrations.items():
+        if column not in existing_columns:
+            conn.execute(f"ALTER TABLE incident_cases ADD COLUMN {column} {definition}")
     conn.commit()
     conn.close()
 
@@ -272,6 +297,8 @@ def promote_alerts_to_cases(alerts: list[dict], sla_policy: dict[str, int]) -> l
         priority = _priority_from_level(level)
         sla_minutes = int(sla_policy.get(priority, 360))
         source_alert_id = alert.get("document_id") or f"{alert.get('rule_id', '')}:{alert.get('timestamp', '')}"
+        rule_groups = ", ".join(alert.get("groups") or []) if isinstance(alert.get("groups"), list) else str(alert.get("groups") or "")
+        raw_json = json.dumps(alert.get("raw") or alert, ensure_ascii=False, sort_keys=True)
         existing = conn.execute(
             "SELECT * FROM incident_cases WHERE source_alert_id = ?",
             (source_alert_id,),
@@ -281,10 +308,33 @@ def promote_alerts_to_cases(alerts: list[dict], sla_policy: dict[str, int]) -> l
             conn.execute(
                 """
                 UPDATE incident_cases
-                   SET priority = ?, updated_at = ?, raw_summary = ?
+                   SET priority = ?, updated_at = ?, raw_summary = ?, raw_json = ?,
+                       rule_level = ?, rule_groups = ?, agent_id = ?, agent_ip = ?,
+                       manager_name = ?, decoder_name = ?, location = ?,
+                       src_ip = ?, dst_ip = ?, src_port = ?, dst_port = ?,
+                       mitre_tactic = ?, mitre_technique = ?
                  WHERE source_alert_id = ?
                 """,
-                (priority, now.isoformat(), alert.get("full_log", ""), source_alert_id),
+                (
+                    priority,
+                    now.isoformat(),
+                    alert.get("full_log", ""),
+                    raw_json,
+                    level,
+                    rule_groups,
+                    alert.get("agent_id", ""),
+                    alert.get("agent_ip", ""),
+                    alert.get("manager_name", ""),
+                    alert.get("decoder_name", ""),
+                    alert.get("location", ""),
+                    alert.get("src_ip", ""),
+                    alert.get("dst_ip", ""),
+                    str(alert.get("src_port", "") or ""),
+                    str(alert.get("dst_port", "") or ""),
+                    alert.get("mitre_tactic") or "Detection",
+                    alert.get("mitre_technique", ""),
+                    source_alert_id,
+                ),
             )
         else:
             next_number = int(conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM incident_cases").fetchone()[0])
@@ -293,18 +343,21 @@ def promote_alerts_to_cases(alerts: list[dict], sla_policy: dict[str, int]) -> l
             conn.execute(
                 """
                 INSERT INTO incident_cases (
-                    case_id, source_alert_id, source_index, rule_id, title, priority,
+                    case_id, source_alert_id, source_index, rule_id, rule_level, rule_groups, title, priority,
                     status, owner, sla_minutes, alert_timestamp, created_at, updated_at,
-                    due_at, agent_name, agent_ip, src_ip, dst_ip, mitre_tactic,
-                    mitre_technique, raw_summary
+                    due_at, agent_name, agent_id, agent_ip, manager_name, decoder_name,
+                    location, src_ip, dst_ip, src_port, dst_port, mitre_tactic,
+                    mitre_technique, raw_summary, raw_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 'new', 'Unassigned', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', 'Unassigned', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     case_id,
                     source_alert_id,
                     alert.get("index", ""),
                     str(alert.get("rule_id", "")),
+                    level,
+                    rule_groups,
                     alert.get("description") or "Wazuh alert",
                     priority,
                     sla_minutes,
@@ -313,12 +366,19 @@ def promote_alerts_to_cases(alerts: list[dict], sla_policy: dict[str, int]) -> l
                     now.isoformat(),
                     due_at.isoformat(),
                     alert.get("agent_name", "unknown"),
+                    alert.get("agent_id", ""),
                     alert.get("agent_ip", ""),
+                    alert.get("manager_name", ""),
+                    alert.get("decoder_name", ""),
+                    alert.get("location", ""),
                     alert.get("src_ip", ""),
                     alert.get("dst_ip", ""),
+                    str(alert.get("src_port", "") or ""),
+                    str(alert.get("dst_port", "") or ""),
                     alert.get("mitre_tactic") or "Detection",
                     alert.get("mitre_technique", ""),
                     alert.get("full_log", ""),
+                    raw_json,
                 ),
             )
 

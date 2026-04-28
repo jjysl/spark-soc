@@ -244,6 +244,7 @@ def get_executive_alerts(indexer_base: str, user: str, password: str, time_range
             "mitre_tactic": tactics[0] if tactics else "",
             "mitre_technique": techniques[0] if techniques else "",
             "full_log": src.get("full_log", ""),
+            "raw": src,
         })
 
     level_buckets = raw.get("aggregations", {}).get("levels", {}).get("buckets", [])

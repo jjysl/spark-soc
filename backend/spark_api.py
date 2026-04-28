@@ -5,6 +5,7 @@ Todos os endpoints do dashboard agrupados num Blueprint Flask.
 """
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime, timezone
+import json
 import time
 
 from flask import Blueprint, jsonify, request
@@ -78,6 +79,12 @@ def _build_workqueue(cases: list[dict]) -> tuple[list[dict], dict]:
     measurable = 0
 
     for idx, case in enumerate(cases, start=1):
+        raw_event = {}
+        if case.get("raw_json"):
+            try:
+                raw_event = json.loads(case.get("raw_json") or "{}")
+            except (TypeError, ValueError):
+                raw_event = {"parse_error": "raw_json is not valid JSON"}
         priority = case.get("priority") or "P3"
         policy_minutes = int(case.get("sla_minutes") or SLA_POLICY_MINUTES.get(priority, 90))
         created_at = _parse_wazuh_timestamp(case.get("created_at", ""))
@@ -114,18 +121,18 @@ def _build_workqueue(cases: list[dict]) -> tuple[list[dict], dict]:
             "timestamp": case.get("created_at", ""),
             "alertTimestamp": case.get("alert_timestamp", ""),
             "description": case.get("title") or "Wazuh alert",
-            "level": "",
-            "groups": [],
-            "agentId": "",
+            "level": case.get("rule_level", ""),
+            "groups": [item.strip() for item in (case.get("rule_groups") or "").split(",") if item.strip()],
+            "agentId": case.get("agent_id", ""),
             "agentName": case.get("agent_name", "unknown"),
             "agentIp": case.get("agent_ip", ""),
-            "managerName": "",
-            "decoderName": "",
-            "location": "",
+            "managerName": case.get("manager_name", ""),
+            "decoderName": case.get("decoder_name", ""),
+            "location": case.get("location", ""),
             "srcIp": case.get("src_ip", ""),
             "dstIp": case.get("dst_ip", ""),
-            "srcPort": "",
-            "dstPort": "",
+            "srcPort": case.get("src_port", ""),
+            "dstPort": case.get("dst_port", ""),
             "tactic": case.get("mitre_tactic") or "Detection",
             "technique": case.get("mitre_technique", ""),
             "priority": priority,
@@ -142,6 +149,7 @@ def _build_workqueue(cases: list[dict]) -> tuple[list[dict], dict]:
             "status": status,
             "statusBadge": "bdone" if status == "Closed" else "binv" if status in {"Investigating", "Acknowledged"} else "bnew",
             "fullLog": case.get("raw_summary", ""),
+            "rawEvent": raw_event,
         })
 
     sla_compliance = round((within_sla / measurable) * 100, 1) if measurable else None
