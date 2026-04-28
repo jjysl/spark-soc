@@ -2,7 +2,9 @@
 import sqlite3
 from datetime import datetime
 
-DB_PATH = 'events.db'
+import config
+
+DB_PATH = config.DB_PATH
 
 
 def inicializar_banco():
@@ -41,7 +43,7 @@ def inicializar_banco():
 
     conn.commit()
     conn.close()
-    print("[DB] Database initialized: events.db")
+    print(f"[DB] Database initialized: {DB_PATH}")
 
 
 def salvar_evento(dados: dict):

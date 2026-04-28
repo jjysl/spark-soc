@@ -1,0 +1,862 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPARK SOC — NG-SOC as a Service · powered by Fortinet</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#f2f4f7;--white:#fff;--border:#e2e5ea;--border-s:#c8cdd5;
+  --t1:#0d1421;--t2:#4a5568;--tm:#8a95a3;
+  --red:#da291c;--red-l:#fff1f0;--red-b:#fca5a0;
+  --blue:#1a56db;--blue-l:#eff6ff;
+  --green:#047857;--green-l:#ecfdf5;
+  --amber:#b45309;--amber-l:#fffbeb;
+  --r:6px;--rl:8px;
+  --sh:0 1px 3px rgba(0,0,0,.07),0 1px 2px rgba(0,0,0,.04);
+}
+body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var(--t1);font-size:13px;line-height:1.5;min-height:100vh;display:flex;flex-direction:column}
+
+/* TOPBAR */
+.topbar{background:var(--white);border-bottom:1px solid var(--border);height:52px;display:flex;align-items:center;padding:0 24px;position:sticky;top:0;z-index:100;box-shadow:var(--sh)}
+.brand{display:flex;align-items:center;gap:10px;flex-shrink:0;padding-right:24px;border-right:1px solid var(--border)}
+.bmark{width:30px;height:30px;background:var(--red);border-radius:5px;display:flex;align-items:center;justify-content:center}
+.bmark svg{width:17px;height:17px;fill:#fff}
+.bname{font-size:14px;font-weight:600;letter-spacing:-.01em}
+.bsub{font-size:11px;color:var(--tm);font-weight:400}
+.tr{margin-left:auto;display:flex;align-items:center;gap:18px}
+.spill{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--t2)}
+.sdot{width:7px;height:7px;border-radius:50%}
+.sg{background:#10b981}.sr{background:var(--red);animation:blink 1.4s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+.mts{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--tm)}
+.nbadge{background:var(--red);color:#fff;font-size:11px;font-weight:600;padding:2px 7px;border-radius:10px}
+.av{width:30px;height:30px;border-radius:50%;background:#1a1f2e;color:#a8b2c1;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;letter-spacing:.05em}
+
+/* TAB BAR */
+.tabbar{background:var(--white);border-bottom:1px solid var(--border);padding:0 24px;display:flex;gap:2px}
+.tbtn{font-family:'Inter',sans-serif;font-size:13px;font-weight:500;color:var(--tm);background:none;border:none;border-bottom:2px solid transparent;padding:12px 16px 10px;cursor:pointer;transition:color .15s,border-color .15s;white-space:nowrap}
+.tbtn:hover{color:var(--t1)}.tbtn.active{color:var(--red);border-bottom-color:var(--red)}
+
+/* LAYOUT */
+.main{flex:1;padding:20px 24px}
+.panel{display:none}.panel.active{display:block}
+
+/* PAGE HEADER */
+.ph{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px}
+.ptitle{font-size:17px;font-weight:600;letter-spacing:-.02em}
+.psub{font-size:12px;color:var(--tm);margin-top:2px}
+.ldot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#10b981;margin-right:4px;animation:blink 1.4s infinite}
+.ha{display:flex;gap:8px;align-items:center}
+.btn{font-family:'Inter',sans-serif;font-size:12px;font-weight:500;padding:6px 14px;border-radius:var(--r);border:1px solid var(--border-s);background:var(--white);color:var(--t2);cursor:pointer;transition:background .12s}
+.btn:hover{background:var(--bg)}.btnp{background:var(--red);color:#fff;border-color:var(--red)}.btnp:hover{background:#c0241a}
+.tsel{display:flex;background:var(--white);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.tsel span{padding:5px 10px;font-size:12px;font-weight:500;color:var(--tm);cursor:pointer;border-right:1px solid var(--border);transition:background .12s,color .12s}
+.tsel span:last-child{border-right:none}.tsel span:hover{background:var(--bg);color:var(--t1)}.tsel span.active{background:#1a1f2e;color:#fff}
+
+/* CARDS */
+.card{background:var(--white);border:1px solid var(--border);border-radius:var(--rl);box-shadow:var(--sh);overflow:hidden}
+.ch{display:flex;align-items:center;justify-content:space-between;padding:13px 16px 11px;border-bottom:1px solid var(--border)}
+.ct{font-size:13px;font-weight:600}.cs{font-size:11px;color:var(--tm);margin-top:1px}
+.ca{font-size:11px;color:var(--blue);cursor:pointer;font-weight:500}
+.cb{padding:16px}
+
+/* KPI */
+.krow{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px}
+.kpi{background:var(--white);border:1px solid var(--border);border-radius:var(--rl);padding:14px 16px;box-shadow:var(--sh)}
+.kpi.ka{border-color:var(--red-b);background:var(--red-l)}
+.kl{font-size:10px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.07em;margin-bottom:7px}
+.kv{font-size:26px;font-weight:600;color:var(--t1);letter-spacing:-.03em;line-height:1}
+.kpi.ka .kv{color:var(--red)}
+.kd{font-size:11px;color:var(--tm);margin-top:5px}
+.up{color:var(--red);font-weight:500}.dn{color:var(--green);font-weight:500}
+
+/* GRIDS */
+.g21{display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-bottom:14px}
+.g11{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.g12{display:grid;grid-template-columns:1fr 2fr;gap:14px;margin-bottom:14px}
+.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+
+/* BADGES */
+.badge{display:inline-flex;align-items:center;font-size:10px;font-weight:600;padding:2px 7px;border-radius:3px;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap}
+.bcrit{background:#fee2e2;color:#991b1b}.bhigh{background:#fff7ed;color:#9a3412}
+.bmed{background:#fffbeb;color:#92400e}.blow{background:#f0fdf4;color:#14532d}
+.binfo{background:#eff6ff;color:#1e40af}.bnew{background:#f5f3ff;color:#5b21b6}
+.binv{background:#fff7ed;color:#9a3412}.bcont{background:#f0fdf4;color:#14532d}
+.bclose{background:#f9fafb;color:#4b5563}.bp1{background:#fee2e2;color:#991b1b}
+.bp2{background:#fff7ed;color:#9a3412}.bp3{background:#fffbeb;color:#92400e}
+.bp4{background:#f0fdf4;color:#14532d}.bok{background:#ecfdf5;color:#065f46}
+.bexp{background:#f5f3ff;color:#5b21b6}.blive{background:#ecfdf5;color:#065f46}
+
+/* SECTION DIVIDER */
+.sdiv{display:flex;align-items:center;gap:10px;margin:18px 0 13px}
+.sdlabel{font-size:10px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.08em;white-space:nowrap}
+.sdline{flex:1;height:1px;background:var(--border)}
+
+/* TABLE */
+.ftable{width:100%;border-collapse:collapse}
+.ftable th{font-size:10px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.07em;padding:8px 14px;text-align:left;border-bottom:1px solid var(--border);background:#fafbfc;white-space:nowrap}
+.ftable td{padding:10px 14px;border-bottom:1px solid var(--border);color:var(--t2);vertical-align:middle}
+.ftable tr:last-child td{border-bottom:none}.ftable tr:hover td{background:#fafbfc;cursor:pointer}
+.mono{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--tm)}
+.edesc{font-size:12px;font-weight:500;color:var(--t1);max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tpill{font-size:10px;font-weight:500;color:var(--t2);background:var(--bg);border:1px solid var(--border);padding:2px 7px;border-radius:3px;white-space:nowrap}
+
+/* WORKQUEUE SLA */
+.slaw{display:flex;flex-direction:column;align-items:flex-end}
+.slat{font-size:10px;font-weight:500}
+.slok{color:var(--green)}.slwarn{color:var(--amber)}.slbr{color:var(--red)}
+.slbar{width:64px;height:3px;background:var(--border);border-radius:2px;overflow:hidden;margin-top:3px}
+.slbf{height:100%;border-radius:2px}
+.fok{background:#10b981}.fwarn{background:#f59e0b}.fbr{background:var(--red)}
+
+/* SCORE */
+.sring{display:flex;align-items:center;gap:20px;padding:14px 16px}
+.sbk{flex:1;display:flex;flex-direction:column;gap:7px}
+.sci{display:flex;align-items:center;gap:8px}
+.scl{font-size:11px;color:var(--t2);flex:1}
+.scbg{flex:1.5;height:4px;background:var(--border);border-radius:2px;overflow:hidden}
+.scf{height:100%;border-radius:2px}
+.scv{font-size:11px;font-weight:600;color:var(--t1);min-width:26px;text-align:right}
+
+/* BLOCKED IPS */
+.iprow{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:11px}
+.iprow:last-child{border-bottom:none}
+.ipaddr{font-family:'JetBrains Mono',monospace;color:var(--t1)}
+.ipgeo{color:var(--tm);width:24px}
+.ipbw{flex:1;margin:0 10px;height:3px;background:var(--border);border-radius:2px;overflow:hidden}
+.ipbf{height:100%;background:var(--red);border-radius:2px}
+.ipcnt{font-weight:600;color:var(--t2)}
+
+/* FORTI STATS */
+.fgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.fstat{background:#fafbfc;border:1px solid var(--border);border-radius:var(--r);padding:10px 12px}
+.fsl{font-size:10px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.06em}
+.fsv{font-size:18px;font-weight:600;color:var(--t1);margin-top:2px;font-family:'JetBrains Mono',monospace}
+.fss{font-size:10px;color:var(--tm);margin-top:2px}
+
+/* UEBA */
+.urow{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border)}
+.urow:last-child{border-bottom:none}
+.uav{width:26px;height:26px;border-radius:50%;background:var(--bg);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;color:var(--tm);flex-shrink:0}
+.uinfo{flex:1;min-width:0}
+.uname{font-size:12px;font-weight:500;color:var(--t1)}
+.uact{font-size:11px;color:var(--tm)}
+.uscr{font-size:12px;font-weight:600}
+.slow{color:var(--green)}.smed{color:var(--amber)}.shi{color:var(--red)}
+
+/* KILL CHAIN / PLAYBOOK */
+.kcstep,.pbstep{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;position:relative}
+.kcstep:not(:last-child)::before,.pbstep:not(:last-child)::before{content:'';position:absolute;left:13px;top:28px;width:1px;height:calc(100% - 4px);background:var(--border)}
+.kcicon,.pbicon{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex-shrink:0;position:relative;z-index:1}
+.done{background:#ecfdf5;color:#047857;border:1px solid #a7f3d0}
+.act{background:#fffbeb;color:#b45309;border:1px solid #fcd34d}
+.pend{background:var(--bg);color:var(--tm);border:1px solid var(--border)}
+.kct{font-size:12px;font-weight:500;color:var(--t1);padding-top:5px}
+.kcs{font-size:11px;color:var(--tm);margin-top:1px}
+
+/* TIMELINE */
+.tlitem{display:flex;gap:10px;align-items:flex-start;margin-bottom:8px}
+.tltime{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--tm);width:58px;flex-shrink:0;padding-top:2px}
+.tldot{width:8px;height:8px;border-radius:50%;margin-top:4px;flex-shrink:0}
+.tltext{font-size:12px;color:var(--t1)}
+
+/* API ACTIONS */
+.apirow{display:flex;align-items:center;gap:8px;margin-bottom:7px;font-size:11px;font-family:'JetBrains Mono',monospace}
+
+/* COMPLIANCE */
+.cbar{margin-bottom:11px}
+.chead{display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;color:var(--t2)}
+.cval{font-weight:500;color:var(--t1)}
+.ctrack{height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+.cfill{height:100%;border-radius:3px}
+
+/* NET BARS */
+.nbar{display:flex;align-items:center;gap:8px;margin-bottom:7px;font-size:12px}
+.nl{width:110px;color:var(--t2);font-size:11px}
+.ntrack{flex:1;height:7px;background:var(--border);border-radius:4px;overflow:hidden}
+.nfill{height:100%;border-radius:4px}
+.nval{width:32px;text-align:right;color:var(--t2);font-size:11px}
+
+/* RISK SEGS */
+.rseg{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.rsname{width:155px;font-size:11px;color:var(--t2);flex-shrink:0}
+.rsbar{flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+.rsfill{height:100%;border-radius:3px}
+.rsval{width:28px;font-size:11px;font-weight:600;color:var(--t2);text-align:right}
+
+/* AI BOX */
+.aibox{background:#eff6ff;border:1px solid #bfdbfe;border-radius:var(--r);padding:10px 14px;font-size:12px;color:#1e40af;margin-bottom:14px}
+.aibox strong{font-weight:600}
+.aibox.loading{background:#f8fafc;border-color:var(--border);color:var(--t2)}
+.source-strip{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.source-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:var(--white);color:var(--t2);border-radius:999px;padding:5px 10px;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;box-shadow:var(--sh)}
+.source-chip.ok{border-color:#bbf7d0;background:#f0fdf4;color:#14532d}
+.source-chip.warn{border-color:#fed7aa;background:#fff7ed;color:#9a3412}
+.source-chip.loading{color:var(--tm)}
+.source-dot{width:7px;height:7px;border-radius:50%;background:var(--tm)}
+.source-chip.ok .source-dot{background:#10b981}
+.source-chip.warn .source-dot{background:#f59e0b}
+.source-chip.loading .source-dot{animation:blink 1.4s infinite}
+.skel{position:relative;overflow:hidden;background:#eef1f5;border-radius:4px;color:transparent!important}
+.skel::after{content:'';position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,rgba(255,255,255,.65),transparent);animation:shimmer 1.3s infinite}
+@keyframes shimmer{100%{transform:translateX(100%)}}
+
+/* CHARTS */
+.cwrap{padding:14px}.cwrap canvas{max-height:175px}
+
+/* TOPOLOGY */
+.twrap{padding:14px}.twrap svg{width:100%;height:185px}
+
+/* FOOTER */
+.footer{background:var(--white);border-top:1px solid var(--border);padding:8px 24px;display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--tm)}
+.fsys{display:flex;gap:18px}.fsok{color:var(--green);font-weight:500}
+
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-thumb{background:var(--border-s);border-radius:3px}
+
+/* ── JIRA PANEL ── */
+.jira-topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px}
+.jira-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.jira-filter-sel{font-family:'Inter',sans-serif;font-size:12px;padding:5px 10px;border:1px solid var(--border-s);border-radius:var(--r);background:var(--white);color:var(--t2);cursor:pointer}
+.jira-filter-sel:focus{outline:none;border-color:var(--blue)}
+
+/* TICKET BOARD */
+.jira-board{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.jira-col{background:#f8fafc;border:1px solid var(--border);border-radius:var(--rl);overflow:hidden;min-height:400px}
+.jira-col-head{padding:10px 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.jira-col-count{font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px}
+.jcol-open .jira-col-head{background:#fff7ed;color:#9a3412}.jcol-open .jira-col-count{background:#fed7aa;color:#9a3412}
+.jcol-prog .jira-col-head{background:#eff6ff;color:#1e40af}.jcol-prog .jira-col-count{background:#bfdbfe;color:#1e40af}
+.jcol-review .jira-col-head{background:#f5f3ff;color:#5b21b6}.jcol-review .jira-col-count{background:#ddd6fe;color:#5b21b6}
+.jcol-done .jira-col-head{background:#f0fdf4;color:#14532d}.jcol-done .jira-col-count{background:#bbf7d0;color:#14532d}
+.jira-col-body{padding:8px;display:flex;flex-direction:column;gap:6px}
+
+/* TICKET CARD */
+.jcard{background:var(--white);border:1px solid var(--border);border-radius:6px;padding:10px 12px;cursor:pointer;transition:box-shadow .15s,border-color .15s;position:relative}
+.jcard:hover{box-shadow:0 3px 10px rgba(0,0,0,.1);border-color:var(--border-s)}
+.jcard-id{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--tm);margin-bottom:5px;display:flex;align-items:center;justify-content:space-between}
+.jcard-title{font-size:12px;font-weight:500;color:var(--t1);line-height:1.4;margin-bottom:8px}
+.jcard-meta{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.jcard-av{width:18px;height:18px;border-radius:50%;background:#1a1f2e;color:#a8b2c1;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;flex-shrink:0}
+.jcard-inc{font-size:10px;color:var(--blue);font-weight:500;background:var(--blue-l);padding:1px 6px;border-radius:3px}
+.jcard-ai-flag{position:absolute;top:8px;right:8px;width:14px;height:14px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:8px;color:#fff;font-weight:700}
+
+/* MODAL */
+.jira-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:none;align-items:center;justify-content:center;padding:20px}
+.jira-overlay.open{display:flex}
+.jira-modal{background:var(--white);border-radius:10px;width:100%;max-width:780px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.25);display:flex;flex-direction:column}
+.jm-header{padding:18px 20px 14px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;justify-content:space-between;gap:12px;position:sticky;top:0;background:var(--white);z-index:1}
+.jm-title-block{flex:1}
+.jm-id{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--blue);font-weight:600;margin-bottom:4px}
+.jm-title{font-size:16px;font-weight:600;color:var(--t1);letter-spacing:-.02em}
+.jm-close{width:30px;height:30px;border-radius:50%;border:none;background:var(--bg);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--t2)}
+.jm-close:hover{background:var(--border)}
+.jm-body{padding:18px 20px;display:grid;grid-template-columns:1fr 220px;gap:18px}
+.jm-main{display:flex;flex-direction:column;gap:14px}
+.jm-sidebar{display:flex;flex-direction:column;gap:10px}
+.jm-label{font-size:10px;font-weight:700;color:var(--tm);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px}
+.jm-field{display:flex;flex-direction:column;gap:3px}
+.jm-input,.jm-textarea,.jm-select{font-family:'Inter',sans-serif;font-size:12px;padding:7px 10px;border:1px solid var(--border-s);border-radius:var(--r);color:var(--t1);background:var(--white);width:100%;transition:border-color .15s}
+.jm-input:focus,.jm-textarea:focus,.jm-select:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(26,86,219,.08)}
+.jm-textarea{min-height:90px;resize:vertical;line-height:1.55}
+.jm-select{cursor:pointer}
+.jm-sidebar-field{font-size:11px}
+.jm-sidebar-label{font-size:10px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px}
+.jm-sidebar-val{font-size:12px;color:var(--t2);font-weight:500}
+
+/* AI AUTOFILL BOX */
+.ai-fill-box{background:linear-gradient(135deg,#f5f3ff 0%,#eff6ff 100%);border:1px solid #c4b5fd;border-radius:var(--rl);padding:12px 14px}
+.ai-fill-header{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.ai-fill-icon{width:24px;height:24px;border-radius:5px;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:700;flex-shrink:0}
+.ai-fill-title{font-size:12px;font-weight:600;color:#4c1d95}
+.ai-fill-sub{font-size:11px;color:#6d28d9;margin-top:1px}
+.ai-fill-actions{display:flex;gap:6px;flex-wrap:wrap}
+.ai-chip{font-family:'Inter',sans-serif;font-size:11px;font-weight:500;padding:5px 10px;border-radius:20px;border:1px solid #c4b5fd;background:#fff;color:#5b21b6;cursor:pointer;transition:background .12s,color .12s}
+.ai-chip:hover{background:#7c3aed;color:#fff;border-color:#7c3aed}
+.ai-chip.loading{opacity:.6;pointer-events:none}
+.ai-typing{font-size:11px;color:#6d28d9;font-style:italic;margin-top:6px;min-height:16px}
+
+/* AI STREAM */
+.ai-stream-box{background:#f8fafc;border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;font-size:12px;color:var(--t2);line-height:1.6;min-height:50px;white-space:pre-wrap;font-family:'JetBrains Mono',monospace}
+
+/* JIRA STATS */
+.jira-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px}
+.jstat{background:var(--white);border:1px solid var(--border);border-radius:var(--rl);padding:12px 14px;box-shadow:var(--sh);text-align:center}
+.jstat-v{font-size:22px;font-weight:700;letter-spacing:-.03em;line-height:1}
+.jstat-l{font-size:10px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.07em;margin-top:5px}
+
+/* NEW TICKET BTN */
+.btnj{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:600}
+.btnj:hover{background:linear-gradient(135deg,#4f46e5,#7c3aed);border-color:transparent}
+
+/* CONFIG SECTION */
+.jira-config-row{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+.jira-config-status{font-size:11px;padding:4px 10px;border-radius:20px;font-weight:500;white-space:nowrap}
+.jcfg-ok{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0}
+.jcfg-err{background:#fee2e2;color:#991b1b;border:1px solid #fca5a0}
+.jcfg-off{background:#f9fafb;color:#6b7280;border:1px solid var(--border)}
+
+/* COUNTRY FLAG */
+.jcard-country{font-size:10px;color:var(--tm);font-family:'JetBrains Mono',monospace;background:var(--bg);border:1px solid var(--border);padding:1px 5px;border-radius:3px}
+
+/* BLOCK STATUS BADGE */
+.jcard-blocked{font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:#fee2e2;color:#991b1b;border:1px solid #fca5a0;text-transform:uppercase;letter-spacing:.04em}
+.jcard-escalated{font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:#f5f3ff;color:#5b21b6;border:1px solid #ddd6fe;text-transform:uppercase;letter-spacing:.04em}
+
+/* SPINNER */
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{display:inline-block;width:10px;height:10px;border:2px solid #c4b5fd;border-top-color:#7c3aed;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:4px}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="bmark"><svg viewBox="0 0 16 16"><path d="M8 1L2 4v4c0 3.5 2.5 6.7 6 7.4C11.5 14.7 14 11.5 14 8V4L8 1zm0 2.2l4 2v2.8c0 2.3-1.6 4.4-4 5.1-2.4-.7-4-2.8-4-5.1V5.2l4-2z"/></svg></div>
+    <div><div class="bname">SPARK SOC</div><div class="bsub">NG-SOC as a Service · powered by Fortinet</div></div>
+  </div>
+  <div class="tr">
+    <div class="spill" id="globalSystemStatus"><div class="sdot sg"></div>Checking live sources</div>
+    <div class="spill" id="globalP1Status" style="color:var(--red)"><div class="sdot sr"></div>-- P1 open</div>
+    <div class="mts" id="clock">--:--:-- UTC</div>
+    <span class="nbadge" id="globalAlertBadge">--</span>
+    <div style="display:flex;align-items:center;gap:8px;margin-left:4px">
+      <div class="av" id="userAvatar">...</div>
+      <div style="display:flex;flex-direction:column;line-height:1.2">
+        <span id="userName" style="font-size:11px;font-weight:600;color:#0d1421">Carregando...</span>
+        <span id="userRole" style="font-size:10px;color:#8a95a3;text-transform:capitalize"></span>
+      </div>
+      <button onclick="doLogout()" title="Sair" style="background:none;border:1px solid #e2e5ea;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:11px;color:#4a5568;font-family:'Inter',sans-serif;margin-left:4px">Sair</button>
+    </div>
+  </div>
+</header>
+
+<nav class="tabbar">
+  <button class="tbtn active" onclick="switchTab('exec',this)">Executive Overview</button>
+  <button class="tbtn" onclick="switchTab('threat',this)">Threat Detection</button>
+  <button class="tbtn" onclick="switchTab('network',this)">Network &amp; Endpoint</button>
+  <button class="tbtn" onclick="switchTab('ir',this)">Incident Response</button>
+  <button class="tbtn" onclick="switchTab('compliance',this)">Compliance &amp; Risk</button>
+  <button class="tbtn" onclick="switchTab('jira',this)">Tickets de Incidentes</button>
+</nav>
+
+<main class="main">
+
+<!-- ═══════════ TAB 1 — EXECUTIVE OVERVIEW ═══════════ -->
+<div class="panel active" id="panel-exec">
+  <div id="executive-root">
+    <div class="ph">
+      <div><div class="ptitle">Executive Overview</div><div class="psub"><span class="ldot"></span>Sincronizando Wazuh, FortiGate e Shuffle...</div></div>
+      <div class="ha">
+        <div class="tsel"><span class="active">24h</span></div>
+        <button class="btn" disabled>Export Report</button>
+        <button class="btn btnp" disabled>Open Service Request</button>
+      </div>
+    </div>
+    <div class="krow">
+      <div class="kpi ka"><div class="kl">P1 - Critical Incidents</div><div class="kv">...</div><div class="kd">Carregando dados live</div></div>
+      <div class="kpi"><div class="kl">MTTD</div><div class="kv">...</div><div class="kd">Aguardando Wazuh</div></div>
+      <div class="kpi"><div class="kl">MTTR</div><div class="kv">...</div><div class="kd">Aguardando Shuffle</div></div>
+      <div class="kpi"><div class="kl">SLA Compliance</div><div class="kv">...</div><div class="kd">Calculando</div></div>
+      <div class="kpi"><div class="kl">Monitored Assets</div><div class="kv">...</div><div class="kd">Aguardando agentes</div></div>
+    </div>
+    <div class="aibox"><strong>SPARK Live Triage:</strong> carregando telemetria real...</div>
+  </div>
+</div>
+<!-- ═══════════ TAB 2 — THREAT DETECTION ═══════════ -->
+<div class="panel" id="panel-threat">
+  <div class="ph">
+    <div><div class="ptitle">Threat Detection &amp; Intelligence</div><div class="psub"><span class="ldot"></span>AI-driven Automated Triage · FortiGuard Labs · Fabric Monitoring</div></div>
+    <div class="ha"><button class="btn">Threat Hunting</button><button class="btn btnp">New Triage Rule</button></div>
+  </div>
+
+  <div class="aibox"><strong>FortiGuard AI Triage:</strong> 847 MITRE ATT&amp;CK techniques mapped. Detection coverage: 73%. Coverage gaps: T1055 (Process Injection) and T1078 (Valid Accounts). Risk Adjusted Alert priority recalculated at 14:32 UTC.</div>
+
+  <div class="g12">
+    <div class="card">
+      <div class="ch"><div><div class="ct">Kill Chain — INC-2026-0183</div><div class="cs">Active incident · FortiAnalyzer correlation</div></div><span class="badge bp1">P1</span></div>
+      <div class="cb" id="killchain"></div>
+    </div>
+    <div class="card">
+      <div class="ch"><div><div class="ct">MITRE ATT&amp;CK Heatmap</div><div class="cs">Detection activity · last 24h · FortiGuard threat mapping</div></div><span class="ca">Full matrix</span></div>
+      <div class="cb" id="mitre-wrap"></div>
+    </div>
+  </div>
+
+  <div class="g11">
+    <div class="card">
+      <div class="ch"><div><div class="ct">Correlated Alert Feed</div><div class="cs">Wazuh + FortiGate · AI-enriched · Fabric Monitoring</div></div><span class="ca">View all</span></div>
+      <table class="ftable">
+        <thead><tr><th>Time</th><th>Description</th><th>Source IP</th><th>MITRE</th><th>Severity</th><th>Status</th></tr></thead>
+        <tbody id="alert-feed"></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="ch"><div><div class="ct">FortiGuard Threat Intelligence Feed</div><div class="cs">IOC enrichment · outbreak alerts · FortiGuard Labs</div></div><span class="badge blive">Live</span></div>
+      <div class="cb">
+        <div class="cwrap" style="padding:0 0 14px"><canvas id="iocChart"></canvas></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;text-align:center;border-top:1px solid var(--border);padding-top:12px">
+          <div style="border-right:1px solid var(--border);padding:0 8px"><div style="font-size:16px;font-weight:600;color:var(--red)">47</div><div style="font-size:10px;color:var(--tm);margin-top:2px">Malicious IPs</div></div>
+          <div style="border-right:1px solid var(--border);padding:0 8px"><div style="font-size:16px;font-weight:600;color:var(--amber)">23</div><div style="font-size:10px;color:var(--tm);margin-top:2px">Malicious Domains</div></div>
+          <div style="border-right:1px solid var(--border);padding:0 8px"><div style="font-size:16px;font-weight:600;color:var(--blue)">11</div><div style="font-size:10px;color:var(--tm);margin-top:2px">File Hashes</div></div>
+          <div style="padding:0 8px"><div style="font-size:16px;font-weight:600;color:var(--t2)">8</div><div style="font-size:10px;color:var(--tm);margin-top:2px">Active CVEs</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ TAB 3 — NETWORK & ENDPOINT ═══════════ -->
+<div class="panel" id="panel-network">
+  <div class="ph">
+    <div><div class="ptitle">Network &amp; Endpoint Monitoring</div><div class="psub"><span class="ldot"></span>FortiOS REST API · Monitor APIs · FortiClient/FortiEndpoint · UEBA</div></div>
+    <div class="ha"><button class="btn">Export Topology</button><button class="btn btnp">Quarantine Host</button></div>
+  </div>
+
+  <div class="g4">
+    <div class="kpi"><div class="kl">Active Sessions</div><div class="kv" id="sessVal">12,847</div><div class="kd"><span class="up">340</span> anomalous</div></div>
+    <div class="kpi"><div class="kl">FortiGate CPU</div><div class="kv" id="cpuVal">34%</div><div class="kd">4 cores · Normal</div></div>
+    <div class="kpi"><div class="kl">Throughput</div><div class="kv">8.2 Gbps</div><div class="kd"><span class="dn">Normal</span></div></div>
+    <div class="kpi ka"><div class="kl">Endpoints at Risk</div><div class="kv">7</div><div class="kd"><span class="up">FortiEDR · 1,204 total</span></div></div>
+  </div>
+
+  <div class="g11">
+    <div class="card">
+      <div class="ch"><div><div class="ct">Traffic by Protocol</div><div class="cs">FortiOS REST API · /api/v2/monitor/firewall/session</div></div></div>
+      <div class="cb" id="net-proto"></div>
+    </div>
+    <div class="card">
+      <div class="ch"><div><div class="ct">Network Topology — Live</div><div class="cs">FortiGate as central node · anomalous links highlighted</div></div></div>
+      <div class="twrap"><svg id="topo-svg" viewBox="0 0 440 170"></svg></div>
+    </div>
+  </div>
+
+  <div class="g11">
+    <div class="card">
+      <div class="ch"><div><div class="ct">FortiGate — Live Metrics</div><div class="cs">FortiOS REST API · 192.168.100.1 · FortiOS 7.4</div></div><span class="badge blive">Connected</span></div>
+      <div class="cb">
+        <div class="fgrid">
+          <div class="fstat"><div class="fsl">CPU</div><div class="fsv" id="cpuVal2">34%</div><div class="fss">4 cores · Normal</div></div>
+          <div class="fstat"><div class="fsl">Memory</div><div class="fsv">61%</div><div class="fss">4.9 GB / 8 GB</div></div>
+          <div class="fstat"><div class="fsl">Active Sessions</div><div class="fsv" id="sessVal2">12,847</div><div class="fss">IPv4 + IPv6</div></div>
+          <div class="fstat"><div class="fsl">IPS Events</div><div class="fsv" style="color:var(--red)">47</div><div class="fss">Last 1h · 3 critical</div></div>
+        </div>
+        <div style="font-size:10px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Top Blocked IPs · Configuration API</div>
+        <div class="iprow"><span class="ipaddr">185.220.101.4</span><span class="ipgeo">RU</span><div class="ipbw"><div class="ipbf" style="width:100%"></div></div><span class="ipcnt">2,841</span></div>
+        <div class="iprow"><span class="ipaddr">91.108.4.12</span><span class="ipgeo">CN</span><div class="ipbw"><div class="ipbf" style="width:78%"></div></div><span class="ipcnt">2,214</span></div>
+        <div class="iprow"><span class="ipaddr">45.33.32.156</span><span class="ipgeo">US</span><div class="ipbw"><div class="ipbf" style="width:52%"></div></div><span class="ipcnt">1,477</span></div>
+        <div class="iprow"><span class="ipaddr">103.21.244.0</span><span class="ipgeo">HK</span><div class="ipbw"><div class="ipbf" style="width:34%"></div></div><span class="ipcnt">964</span></div>
+        <div class="iprow"><span class="ipaddr">198.199.10.5</span><span class="ipgeo">NL</span><div class="ipbw"><div class="ipbf" style="width:18%"></div></div><span class="ipcnt">511</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="ch"><div><div class="ct">User &amp; Entity Behavior Analytics</div><div class="cs">Risk Adjusted Alerts · FortiAnalyzer UEBA · anomaly scoring</div></div><span class="ca">View all entities</span></div>
+      <div id="ueba-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ TAB 4 — INCIDENT RESPONSE ═══════════ -->
+<div class="panel" id="panel-ir">
+  <div class="ph">
+    <div><div class="ptitle">Incident Response &amp; SOAR Automation</div><div class="psub"><span class="ldot"></span>Shuffle SOAR · FortiOS REST API · automated playbooks · digital forensics</div></div>
+    <div class="ha"><button class="btn">Forensic Report</button><button class="btn btnp">Isolate Host via API</button></div>
+  </div>
+
+  <div class="aibox"><strong>SOAR Automation — INC-2026-0183:</strong> Host WRK-042 auto-quarantined via FortiGate Policy API at 14:24:01 UTC. FortiEDR snapshot in progress. Analyst notification queued. Containment: complete.</div>
+
+  <div class="g11">
+    <div class="card">
+      <div class="ch"><div><div class="ct">Automated Playbook — INC-2026-0183</div><div class="cs">Lateral Movement response · Shuffle SOAR · FortiOS API</div></div><span class="badge bp1">P1 · Active</span></div>
+      <div class="cb" id="playbook"></div>
+    </div>
+    <div class="card">
+      <div class="ch"><div><div class="ct">Incident Timeline — INC-2026-0183</div><div class="cs">Source: FortiAnalyzer correlation engine</div></div></div>
+      <div class="cb" id="ir-timeline"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="ch"><div><div class="ct">FortiOS REST API — Automated Actions Log</div><div class="cs">Configuration APIs + Monitor APIs · executed by SOAR playbook</div></div><span class="badge blive">4 / 4 successful</span></div>
+    <div class="cb" id="api-actions"></div>
+  </div>
+</div>
+
+<!-- ═══════════ TAB 5 — COMPLIANCE & RISK ═══════════ -->
+<div class="panel" id="panel-compliance">
+  <div class="ph">
+    <div><div class="ptitle">Compliance &amp; Risk Management</div><div class="psub"><span class="ldot"></span>FortiAnalyzer automated reports · configuration drift · vulnerability scoring</div></div>
+    <div class="ha"><button class="btn">Schedule Report</button><button class="btn btnp">Generate Compliance Report</button></div>
+  </div>
+
+  <div class="g4">
+    <div class="kpi"><div class="kl">ISO 27001</div><div class="kv" style="color:var(--green)">91%</div><div class="kd"><span class="dn">Compliant</span></div></div>
+    <div class="kpi"><div class="kl">PCI DSS 4.0</div><div class="kv" style="color:var(--amber)">76%</div><div class="kd"><span class="up">2 controls pending</span></div></div>
+    <div class="kpi"><div class="kl">LGPD / GDPR</div><div class="kv" style="color:var(--green)">88%</div><div class="kd"><span class="dn">Compliant</span></div></div>
+    <div class="kpi"><div class="kl">NIST CSF 2.0</div><div class="kv" style="color:var(--amber)">79%</div><div class="kd"><span class="up">1 gap open</span></div></div>
+  </div>
+
+  <div class="g11">
+    <div class="card">
+      <div class="ch"><div><div class="ct">Controls by Framework</div><div class="cs">FortiAnalyzer automated compliance reporting</div></div></div>
+      <div class="cb" id="comp-bars"></div>
+    </div>
+    <div class="card">
+      <div class="ch"><div><div class="ct">Configuration Drift — Fortinet Fabric</div><div class="cs">FortiAnalyzer audit log · unauthorized changes</div></div><span class="ca">View audit log</span></div>
+      <table class="ftable">
+        <thead><tr><th>Device</th><th>Finding</th><th>Detected</th><th>Severity</th><th>Status</th></tr></thead>
+        <tbody id="drift-table"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="ch"><div><div class="ct">Digital Asset Risk Score — by Network Segment</div><div class="cs">Vulnerability monitoring · internal &amp; external scanning · cloud risk</div></div></div>
+    <div class="cb" id="risk-seg"></div>
+  </div>
+</div>
+
+<!-- ═══════════ TAB 6 — JIRA TICKETS ═══════════ -->
+<div class="panel" id="panel-jira">
+  <div class="ph">
+    <div><div class="ptitle">Tickets de Incidentes</div><div class="psub"><span class="ldot"></span>Jira REST API · AI Auto-fill · Bloqueio de IP · Escalonamento · Resposta a Atividades Suspeitas</div></div>
+    <div class="ha">
+      <button class="btn" onclick="syncJiraTickets()">Sincronizar</button>
+      <button class="btn btnj" onclick="openNewTicket()">+ Novo Ticket</button>
+    </div>
+  </div>
+
+  <!-- JIRA CONFIG -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="ch" style="cursor:pointer" onclick="toggleJiraConfig()">
+      <div style="display:flex;align-items:center;gap:10px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--tm);flex-shrink:0"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <div>
+          <div class="ct">Configuração Jira</div>
+          <div class="cs">REST API · credenciais e projeto</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="jira-config-status jcfg-off" id="jiraCfgStatus">Nao configurado</span>
+        <svg id="jiraCfgChevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--tm);transition:transform .2s"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+    </div>
+    <div id="jiraConfigBody" style="display:none;padding:14px 16px;border-top:1px solid var(--border)">
+      <div class="jira-config-row">
+        <div class="jm-field">
+          <div class="jm-label">Jira Base URL</div>
+          <input class="jm-input" id="cfgJiraUrl" type="text" placeholder="https://seu-org.atlassian.net" style="min-width:240px">
+        </div>
+        <div class="jm-field">
+          <div class="jm-label">Email / Username</div>
+          <input class="jm-input" id="cfgJiraEmail" type="text" placeholder="analyst@empresa.com" style="min-width:180px">
+        </div>
+        <div class="jm-field">
+          <div class="jm-label">API Token</div>
+          <input class="jm-input" id="cfgJiraToken" type="password" placeholder="••••••••••••••••" style="min-width:180px">
+        </div>
+        <div class="jm-field">
+          <div class="jm-label">Project Key</div>
+          <input class="jm-input" id="cfgJiraProject" type="text" placeholder="SPARK" style="min-width:80px;max-width:100px">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <div class="jm-label" style="opacity:0">.</div>
+          <button class="btn btnp" onclick="saveJiraConfig()" style="white-space:nowrap">Salvar e Conectar</button>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--tm);margin-top:4px">As credenciais sao salvas localmente no navegador. O token nao e enviado para nenhum servidor externo.</div>
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div class="jira-stats" id="jiraStats">
+    <div class="jstat"><div class="jstat-v" style="color:var(--red)" id="jstatTotal">0</div><div class="jstat-l">Total Abertos</div></div>
+    <div class="jstat"><div class="jstat-v" style="color:var(--red)" id="jstatP1">0</div><div class="jstat-l">P1 Críticos</div></div>
+    <div class="jstat"><div class="jstat-v" style="color:var(--amber)" id="jstatP2">0</div><div class="jstat-l">P2 Altos</div></div>
+    <div class="jstat"><div class="jstat-v" style="color:var(--green)" id="jstatDone">0</div><div class="jstat-l">Resolvidos</div></div>
+    <div class="jstat"><div class="jstat-v" style="color:var(--blue)" id="jstatAI">0</div><div class="jstat-l">Criados via IA</div></div>
+  </div>
+
+  <!-- AI BOX -->
+  <div class="aibox" id="jiraAiBox"><strong>IA SOC Analyst:</strong> Pronto para analisar alertas ativos e sugerir tickets. Clique em "+ Novo Ticket" para criar um ticket com auto-preenchimento inteligente baseado nos incidentes detectados.</div>
+
+  <!-- FILTERS -->
+  <div class="jira-topbar">
+    <div class="jira-filters">
+      <select class="jira-filter-sel" id="filterPriority" onchange="renderBoard()">
+        <option value="">Todas prioridades</option>
+        <option value="p1">P1 Critical</option>
+        <option value="p2">P2 High</option>
+        <option value="p3">P3 Medium</option>
+        <option value="p4">P4 Low</option>
+      </select>
+      <select class="jira-filter-sel" id="filterAssignee" onchange="renderBoard()">
+        <option value="">Todos analistas</option>
+        <option value="R. Lima">R. Lima</option>
+        <option value="D. Souza">D. Souza</option>
+        <option value="J. Silva">J. Silva</option>
+        <option value="M. Pereira">M. Pereira</option>
+      </select>
+      <select class="jira-filter-sel" id="filterType" onchange="renderBoard()">
+        <option value="">Todos tipos</option>
+        <option value="incident">Incident</option>
+        <option value="threat">Threat</option>
+        <option value="vuln">Vulnerability</option>
+        <option value="task">Task</option>
+      </select>
+    </div>
+    <div style="font-size:11px;color:var(--tm)" id="boardSyncTime">Última sincronização: —</div>
+  </div>
+
+  <!-- KANBAN BOARD -->
+  <div class="jira-board">
+    <div class="jira-col jcol-open">
+      <div class="jira-col-head">Open <span class="jira-col-count" id="cnt-open">0</span></div>
+      <div class="jira-col-body" id="col-open"></div>
+    </div>
+    <div class="jira-col jcol-prog">
+      <div class="jira-col-head">In Progress <span class="jira-col-count" id="cnt-inprogress">0</span></div>
+      <div class="jira-col-body" id="col-inprogress"></div>
+    </div>
+    <div class="jira-col jcol-review">
+      <div class="jira-col-head">In Review <span class="jira-col-count" id="cnt-review">0</span></div>
+      <div class="jira-col-body" id="col-review"></div>
+    </div>
+    <div class="jira-col jcol-done">
+      <div class="jira-col-head">Done <span class="jira-col-count" id="cnt-done">0</span></div>
+      <div class="jira-col-body" id="col-done"></div>
+    </div>
+  </div>
+
+  <!-- IP BLOCK LOG + ESCALATIONS -->
+  <div class="g11">
+    <div class="card">
+      <div class="ch">
+        <div><div class="ct">Log de Bloqueio de IPs</div><div class="cs">Acoes executadas via FortiGate API · historico da sessao</div></div>
+        <span class="badge blive" id="blockedCount">0 bloqueados</span>
+      </div>
+      <div style="padding:0">
+        <table class="ftable">
+          <thead><tr><th>IP</th><th>Pais</th><th>Acao</th><th>Motivo</th><th>Analista</th><th>Hora</th><th>Status</th></tr></thead>
+          <tbody id="ipBlockLog"></tbody>
+        </table>
+        <div id="ipBlockEmpty" style="padding:20px;text-align:center;font-size:12px;color:var(--tm)">Nenhuma acao de bloqueio registrada nesta sessao.</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="ch">
+        <div><div class="ct">Escalonamentos para Superior</div><div class="cs">Incidentes repassados para analise · historico da sessao</div></div>
+        <span class="badge bexp" id="escalationCount">0 escalonamentos</span>
+      </div>
+      <div style="padding:0">
+        <table class="ftable">
+          <thead><tr><th>Ticket</th><th>Incidente</th><th>Repassado para</th><th>Motivo</th><th>Hora</th><th>Status</th></tr></thead>
+          <tbody id="escalationLog"></tbody>
+        </table>
+        <div id="escalationEmpty" style="padding:20px;text-align:center;font-size:12px;color:var(--tm)">Nenhum escalonamento registrado nesta sessao.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</main>
+<div class="jira-overlay" id="jiraOverlay">
+  <div class="jira-modal" id="jiraModal">
+    <div class="jm-header">
+      <div class="jm-title-block">
+        <div class="jm-id" id="jmId">INC-NEW</div>
+        <div class="jm-title" id="jmTitle">Novo Ticket de Incidente</div>
+      </div>
+      <button class="jm-close" onclick="closeJiraModal()">✕</button>
+    </div>
+    <div class="jm-body">
+      <div class="jm-main">
+
+        <!-- AI AUTOFILL -->
+        <div class="ai-fill-box">
+          <div class="ai-fill-header">
+            <div class="ai-fill-icon">AI</div>
+            <div><div class="ai-fill-title">Auto-preenchimento com IA</div><div class="ai-fill-sub">Selecione um alerta para preencher automaticamente</div></div>
+          </div>
+          <div class="ai-fill-actions" id="aiChips"></div>
+          <div class="ai-typing" id="aiTyping"></div>
+        </div>
+
+        <!-- T?TULO -->
+        <div class="jm-field">
+          <div class="jm-label">Título do Ticket</div>
+          <input class="jm-input" id="jmTitleInput" type="text" placeholder="Ex: [P1] Lateral Movement — VLAN 10 · INC-2026-0183">
+        </div>
+
+        <!-- DESCRI??O -->
+        <div class="jm-field">
+          <div class="jm-label">Descrição / Evidências</div>
+          <textarea class="jm-textarea" id="jmDesc" placeholder="Descreva o incidente, IOCs encontrados, ações tomadas..."></textarea>
+        </div>
+
+        <!-- AN?LISE IA -->
+        <div class="jm-field">
+          <div class="jm-label">Análise IA — Contexto &amp; Recomendação</div>
+          <div class="ai-stream-box" id="jmAiAnalysis">Selecione um alerta acima para gerar análise automática…</div>
+        </div>
+
+        <!-- STEPS TO REPRODUCE / PLAYBOOK -->
+        <div class="jm-field">
+          <div class="jm-label">Passos de Resposta (Playbook)</div>
+          <textarea class="jm-textarea" id="jmPlaybook" placeholder="1. Isolar host via FortiGate API&#10;2. Coletar evidências FortiEDR&#10;3. Notificar stakeholders…"></textarea>
+        </div>
+
+      </div>
+      <div class="jm-sidebar">
+
+        <!-- STATUS -->
+        <div class="jm-field">
+          <div class="jm-sidebar-label">Status</div>
+          <select class="jm-select" id="jmStatus">
+            <option value="open">Open</option>
+            <option value="inprogress">In Progress</option>
+            <option value="review">In Review</option>
+            <option value="done">Done</option>
+          </select>
+        </div>
+
+        <!-- PRIORIDADE -->
+        <div class="jm-field">
+          <div class="jm-sidebar-label">Prioridade</div>
+          <select class="jm-select" id="jmPriority">
+            <option value="p1">P1 — Critical</option>
+            <option value="p2">P2 — High</option>
+            <option value="p3">P3 — Medium</option>
+            <option value="p4">P4 — Low</option>
+          </select>
+        </div>
+
+        <!-- TIPO -->
+        <div class="jm-field">
+          <div class="jm-sidebar-label">Tipo</div>
+          <select class="jm-select" id="jmType">
+            <option value="incident">Incident</option>
+            <option value="threat">Threat</option>
+            <option value="vuln">Vulnerability</option>
+            <option value="task">Task</option>
+            <option value="change">Change Request</option>
+          </select>
+        </div>
+
+        <!-- ASSIGNEE -->
+        <div class="jm-field">
+          <div class="jm-sidebar-label">Analista Responsável</div>
+          <select class="jm-select" id="jmAssignee">
+            <option value="">Unassigned</option>
+            <option value="R. Lima">R. Lima</option>
+            <option value="D. Souza">D. Souza</option>
+            <option value="J. Silva">J. Silva</option>
+            <option value="M. Pereira">M. Pereira</option>
+          </select>
+        </div>
+
+        <!-- INCIDENT LINK -->
+        <div class="jm-field">
+          <div class="jm-sidebar-label">Incidente Vinculado</div>
+          <input class="jm-input" id="jmIncLink" type="text" placeholder="INC-2026-XXXX">
+        </div>
+
+        <!-- MITRE -->
+        <div class="jm-field">
+          <div class="jm-sidebar-label">MITRE ATT&CK</div>
+          <input class="jm-input" id="jmMitre" type="text" placeholder="T1550.002, T1041…">
+        </div>
+
+        <!-- SRC IP + PA?S -->
+        <div class="jm-field">
+          <div class="jm-sidebar-label">IP Origem</div>
+          <div style="display:flex;gap:5px">
+            <input class="jm-input" id="jmIp" type="text" placeholder="192.168.x.x / WRK-xxx" style="flex:1">
+            <button class="btn" onclick="lookupIpCountry()" title="Identificar pais" style="padding:5px 8px;flex-shrink:0;font-size:11px">Buscar</button>
+          </div>
+        </div>
+
+        <!-- PA?S DO IP -->
+        <div class="jm-field">
+          <div class="jm-sidebar-label">Pais de Origem</div>
+          <div id="jmCountryDisplay" style="display:flex;align-items:center;gap:7px;padding:7px 10px;background:#fafbfc;border:1px solid var(--border);border-radius:var(--r);min-height:32px">
+            <span id="jmCountryFlag" style="font-size:16px"></span>
+            <span id="jmCountryName" style="font-size:12px;color:var(--t2)">—</span>
+            <span id="jmCountryCode" class="jcard-country" style="display:none"></span>
+          </div>
+        </div>
+
+        <!-- ACAO IP: BLOQUEAR / DESBLOQUEAR -->
+        <div class="jm-field">
+          <div class="jm-sidebar-label">Acao sobre o IP</div>
+          <div style="display:flex;gap:5px">
+            <button class="btn" id="btnBlockIp" onclick="blockIp()" style="flex:1;padding:6px 0;font-size:11px;font-weight:600;color:#991b1b;border-color:#fca5a0;background:#fee2e2">Bloquear IP</button>
+            <button class="btn" id="btnUnblockIp" onclick="unblockIp()" style="flex:1;padding:6px 0;font-size:11px;font-weight:600;color:#065f46;border-color:#a7f3d0;background:#ecfdf5">Desbloquear</button>
+          </div>
+          <div id="jmIpStatus" style="font-size:10px;color:var(--tm);margin-top:3px;min-height:14px"></div>
+        </div>
+
+        <!-- ESCALONAR PARA SUPERIOR -->
+        <div class="jm-field">
+          <div class="jm-sidebar-label">Escalonar para Superior</div>
+          <select class="jm-select" id="jmEscalateTo" onchange="toggleEscalationReason()">
+            <option value="">Nao escalonar</option>
+            <option value="Gerente SOC">Gerente SOC</option>
+            <option value="CISO">CISO</option>
+            <option value="R. Lima (Senior)">R. Lima (Senior)</option>
+            <option value="D. Souza (Senior)">D. Souza (Senior)</option>
+            <option value="J. Silva (Senior)">J. Silva (Senior)</option>
+            <option value="M. Pereira (Senior)">M. Pereira (Senior)</option>
+            <option value="Equipe Forense">Equipe Forense</option>
+          </select>
+        </div>
+        <div class="jm-field" id="escalationReasonField" style="display:none">
+          <div class="jm-sidebar-label">Motivo do Escalonamento</div>
+          <textarea class="jm-textarea" id="jmEscalationReason" placeholder="Descreva o motivo do escalonamento..." style="min-height:60px"></textarea>
+        </div>
+
+        <!-- TICKET KEY -->
+        <div class="jm-field">
+          <div class="jm-sidebar-label">Ticket ID</div>
+          <input class="jm-input" id="jmKey" type="text" placeholder="SPARK-001" readonly style="background:#fafbfc;color:var(--tm)">
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
+          <button class="btn btnj" id="jmSubmitBtn" onclick="submitJiraTicket()" style="width:100%;padding:8px">
+            <span id="jmSubmitLabel">Criar no SOC</span>
+          </button>
+          <button class="btn" onclick="closeJiraModal()" style="width:100%;padding:8px">Cancelar</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer class="footer">
+  <div>SPARK SOC — NG-SOC as a Service &nbsp;·&nbsp; FIAP / Fortinet Challenge 2025 &nbsp;·&nbsp; Team: Diogo, José, Júlio, Matheus, Rafael</div>
+  <div class="fsys">
+    <span>Wazuh <span class="fsok">Connected</span></span>
+    <span>Shuffle SOAR <span class="fsok">Connected</span></span>
+    <span>FortiGate <span class="fsok">Connected</span></span>
+    <span>FortiAnalyzer <span class="fsok">Connected</span></span>
+    <span class="mts" id="footerClock">--:--:-- UTC</span>
+  </div>
+</footer>
+
+<script src="/js/exec.js"></script>
+<script src="/js/threat.js"></script>
+<script src="/js/network.js"></script>
+<script src="/js/ir.js"></script>
+<script src="/js/compliance.js"></script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="/react/executive/ExecutiveOverview.js"></script>
+<script src="/js/tickets.js"></script>
+</body>
+</html>
+

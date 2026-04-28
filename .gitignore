@@ -2,6 +2,7 @@ config.py
 .env
 
 events.db
+data/*.db
 *.db-journal
 *.db-wal
 
