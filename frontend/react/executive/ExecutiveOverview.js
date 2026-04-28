@@ -30,7 +30,7 @@
           key: item,
           className: item === value ? 'active' : '',
           onClick: disabled ? undefined : () => onChange(item),
-          title: `Consultar ${item} no Wazuh Indexer`,
+          title: `Query ${item} in Wazuh Indexer`,
         }, item)
       )
     );
@@ -50,7 +50,7 @@
       h('div', {className: 'ph'},
         h('div', null,
           h('div', {className: 'ptitle'}, 'Executive Overview'),
-          h('div', {className: 'psub'}, h('span', {className: 'ldot'}), 'Sincronizando Wazuh, FortiGate e Shuffle...')
+          h('div', {className: 'psub'}, h('span', {className: 'ldot'}), 'Syncing Wazuh, FortiGate and Shuffle telemetry...')
         ),
         h('div', {className: 'ha'}, h(TimeSelector, {value: '24h', disabled: true}), h('button', {className: 'btn', disabled: true}, 'Export Report'), h('button', {className: 'btn btnp', disabled: true}, 'Open Service Request'))
       ),
@@ -65,7 +65,7 @@
       ),
       h('div', {className: 'aibox loading'},
         h('strong', null, 'SPARK Live Triage: '),
-        error ? `falha ao buscar /spark/executive-overview (${error}).` : 'coletando telemetria das fontes live. A tela sera preenchida quando o primeiro snapshot chegar.'
+        error ? `Failed to fetch /spark/executive-overview (${error}).` : 'Collecting live telemetry. The view will populate when the first snapshot is ready.'
       ),
       h('div', {className: 'source-strip'},
         h(SourceBadge, {label: 'Wazuh', loading: true}),
@@ -73,8 +73,8 @@
         h(SourceBadge, {label: 'Shuffle', loading: true})
       ),
       h('div', {className: 'g21'},
-        h('div', {className: 'card'}, h('div', {className: 'ch'}, h('div', null, h('div', {className: 'ct'}, 'Security Posture Score'), h('div', {className: 'cs'}, 'Aguardando snapshot live'))), h('div', {className: 'cb'}, h('div', {className: 'skel', style: {height: 140}}, '...'))),
-        h('div', {className: 'card'}, h('div', {className: 'ch'}, h('div', null, h('div', {className: 'ct'}, 'Alert Volume - Last 24h'), h('div', {className: 'cs'}, 'Aguardando Wazuh Indexer'))), h('div', {className: 'cb'}, h('div', {className: 'skel', style: {height: 140}}, '...')))
+        h('div', {className: 'card'}, h('div', {className: 'ch'}, h('div', null, h('div', {className: 'ct'}, 'Security Posture Score'), h('div', {className: 'cs'}, 'Waiting for live snapshot'))), h('div', {className: 'cb'}, h('div', {className: 'skel', style: {height: 140}}, '...'))),
+        h('div', {className: 'card'}, h('div', {className: 'ch'}, h('div', null, h('div', {className: 'ct'}, 'Alert Volume - Last 24h'), h('div', {className: 'cs'}, 'Waiting for Wazuh Indexer'))), h('div', {className: 'cb'}, h('div', {className: 'skel', style: {height: 140}}, '...')))
       )
     );
   }
@@ -99,10 +99,17 @@
     }
   }
 
-  function DetailCell({label, value}) {
+  function DetailCell({label, value, onFilter}) {
     return h('div', {className: 'detail-cell'},
       h('div', {className: 'detail-label'}, label),
-      h('div', {className: 'detail-value'}, value || '-')
+      h('div', {className: 'detail-value'}, value || '-'),
+      value && onFilter ? h('button', {
+        className: 'detail-filter',
+        onClick: event => {
+          event.stopPropagation();
+          onFilter(label, value);
+        },
+      }, 'Filter') : null
     );
   }
 
@@ -111,6 +118,7 @@
     const [query, setQuery] = useState('');
     const [priority, setPriority] = useState('all');
     const [detailTab, setDetailTab] = useState('table');
+    const [fieldFilters, setFieldFilters] = useState([]);
     const normalizedQuery = query.trim().toLowerCase();
     const filteredItems = items.filter(item => {
       const matchesPriority = priority === 'all' || item.priority === priority;
@@ -126,10 +134,29 @@
         item.status,
         item.documentId,
         item.index,
+        item.level,
+        Array.isArray(item.groups) ? item.groups.join(' ') : item.groups,
+        item.decoderName,
+        item.location,
       ].join(' ').toLowerCase();
-      return matchesPriority && (!normalizedQuery || haystack.includes(normalizedQuery));
+      const matchesQuery = !normalizedQuery || haystack.includes(normalizedQuery);
+      const matchesFieldFilters = fieldFilters.every(filter => haystack.includes(String(filter.value).toLowerCase()));
+      return matchesPriority && matchesQuery && matchesFieldFilters;
     });
     const priorities = ['all', 'P1', 'P2', 'P3', 'P4'];
+
+    function addFieldFilter(label, value) {
+      if (!value) return;
+      const next = {label, value: String(value)};
+      setFieldFilters(filters => {
+        if (filters.some(filter => filter.label === next.label && filter.value === next.value)) return filters;
+        return [...filters, next];
+      });
+    }
+
+    function removeFieldFilter(index) {
+      setFieldFilters(filters => filters.filter((_, idx) => idx !== index));
+    }
 
     function renderDetails(item) {
       if (detailTab === 'json') {
@@ -137,25 +164,25 @@
       }
       if (detailTab === 'rule') {
         return h('div', {className: 'alert-detail'},
-          h(DetailCell, {label: 'Rule ID', value: item.id}),
-          h(DetailCell, {label: 'Rule Level', value: item.level}),
-          h(DetailCell, {label: 'Groups', value: Array.isArray(item.groups) ? item.groups.join(', ') : item.groups}),
-          h(DetailCell, {label: 'Decoder', value: item.decoderName}),
+          h(DetailCell, {label: 'Rule ID', value: item.id, onFilter: addFieldFilter}),
+          h(DetailCell, {label: 'Rule Level', value: item.level, onFilter: addFieldFilter}),
+          h(DetailCell, {label: 'Groups', value: Array.isArray(item.groups) ? item.groups.join(', ') : item.groups, onFilter: addFieldFilter}),
+          h(DetailCell, {label: 'Decoder', value: item.decoderName, onFilter: addFieldFilter}),
           h(DetailCell, {label: 'Description', value: item.description}),
-          h(DetailCell, {label: 'SOCaaS Priority', value: item.priority}),
+          h(DetailCell, {label: 'SOCaaS Priority', value: item.priority, onFilter: addFieldFilter}),
           h(DetailCell, {label: 'SLA Policy', value: item.slaPolicy}),
-          h(DetailCell, {label: 'Current State', value: item.status}),
+          h(DetailCell, {label: 'Current State', value: item.status, onFilter: addFieldFilter}),
           item.fullLog ? h('pre', {className: 'detail-log'}, item.fullLog) : null
         );
       }
       return h('div', {className: 'alert-detail'},
-        h(DetailCell, {label: 'Rule / Level', value: `${item.id} / level ${item.level}`}),
-        h(DetailCell, {label: 'Agent', value: `${item.agentName || '-'} (${item.agentIp || item.agentId || '-'})`}),
+        h(DetailCell, {label: 'Rule / Level', value: `${item.id} / level ${item.level}`, onFilter: () => addFieldFilter('Rule', item.id)}),
+        h(DetailCell, {label: 'Agent', value: `${item.agentName || '-'} (${item.agentIp || item.agentId || '-'})`, onFilter: () => addFieldFilter('Agent', item.agentName || item.agentIp || item.agentId)}),
         h(DetailCell, {label: 'Source -> Destination', value: `${item.srcIp || '-'}${item.srcPort ? ':' + item.srcPort : ''} -> ${item.dstIp || '-'}${item.dstPort ? ':' + item.dstPort : ''}`}),
-        h(DetailCell, {label: 'MITRE', value: `${item.tactic || '-'} ${item.technique || ''}`.trim()}),
-        h(DetailCell, {label: 'Decoder / Location', value: `${item.decoderName || '-'} / ${item.location || '-'}`}),
-        h(DetailCell, {label: 'Index', value: item.index}),
-        h(DetailCell, {label: 'Document ID', value: item.documentId}),
+        h(DetailCell, {label: 'MITRE', value: `${item.tactic || '-'} ${item.technique || ''}`.trim(), onFilter: () => addFieldFilter('MITRE', item.technique || item.tactic)}),
+        h(DetailCell, {label: 'Decoder / Location', value: `${item.decoderName || '-'} / ${item.location || '-'}`, onFilter: () => addFieldFilter('Decoder', item.decoderName || item.location)}),
+        h(DetailCell, {label: 'Index', value: item.index, onFilter: addFieldFilter}),
+        h(DetailCell, {label: 'Document ID', value: item.documentId, onFilter: addFieldFilter}),
         h(DetailCell, {label: 'SLA Policy', value: `${item.slaPolicy || '-'} (${item.slaState || 'unknown'})`}),
         item.fullLog ? h('pre', {className: 'detail-log'}, item.fullLog) : null
       );
@@ -167,14 +194,14 @@
           h('div', {className: 'ct'}, 'Open Incidents - Service Workqueue'),
           h('div', {className: 'cs'}, 'SLA thresholds: P1 15 min · P2 45 min · P3 90 min · P4 6h · per Fortinet SOCaaS escalation policy')
         ),
-        h('span', {className: 'ca'}, `${filteredItems.length}/${items.length} itens`)
+        h('span', {className: 'ca'}, `${filteredItems.length}/${items.length} items`)
       ),
       h('div', {className: 'wq-tools'},
         h('input', {
           className: 'wq-search',
           value: query,
           onChange: event => setQuery(event.target.value),
-          placeholder: 'Filtrar por regra, agente, IP, MITRE, status ou documento...',
+          placeholder: 'Search rule, agent, IP, MITRE, status or document...',
         }),
         h('div', {className: 'wq-filter'},
           priorities.map(value =>
@@ -186,6 +213,15 @@
           )
         )
       ),
+      fieldFilters.length ? h('div', {className: 'filter-tokens'},
+        fieldFilters.map((filter, index) =>
+          h('span', {className: 'filter-token', key: `${filter.label}-${filter.value}`},
+            `${filter.label}: ${filter.value}`,
+            h('button', {onClick: () => removeFieldFilter(index)}, 'x')
+          )
+        ),
+        h('button', {className: 'detail-filter', onClick: () => setFieldFilters([])}, 'Clear filters')
+      ) : null,
       h('table', {className: 'ftable'},
         h('thead', null,
           h('tr', null,
@@ -236,7 +272,7 @@
               )
             ].filter(Boolean);
           }) : h('tr', null,
-            h('td', {colSpan: 8, style: {color: 'var(--tm)', textAlign: 'center'}}, 'Nenhum alerta no periodo selecionado')
+            h('td', {colSpan: 8, style: {color: 'var(--tm)', textAlign: 'center'}}, 'No alerts match the selected filters')
           )
         )
       )
@@ -284,7 +320,7 @@
       h('div', {className: 'ch'},
         h('div', null,
           h('div', {className: 'ct'}, `Alert Volume - ${range}`),
-          h('div', {className: 'cs'}, `Wazuh Indexer - intervalo ${range}`)
+          h('div', {className: 'cs'}, `Wazuh Indexer - range ${range}`)
         )
       ),
       h('div', {className: 'cwrap'}, h('canvas', {ref: canvasRef})),
@@ -313,7 +349,7 @@
       h('div', {className: 'ch'},
         h('div', null,
           h('div', {className: 'ct'}, 'Security Posture Score'),
-          h('div', {className: 'cs'}, 'Score composto por Wazuh, FortiGate e Shuffle')
+          h('div', {className: 'cs'}, 'Fortinet SOCaaS composite score from Wazuh, FortiGate and Shuffle')
         ),
         h('span', {className: 'badge bexp'}, 'Live')
       ),
@@ -352,8 +388,10 @@
     const [error, setError] = useState('');
     const [updatedAt, setUpdatedAt] = useState(null);
     const [range, setRange] = useState('24h');
+    const [loading, setLoading] = useState(false);
 
     async function load(selectedRange = range) {
+      setLoading(true);
       try {
         const response = await fetch(`/spark/executive-overview?range=${encodeURIComponent(selectedRange)}`, {credentials: 'include'});
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -364,6 +402,8 @@
         setError('');
       } catch (err) {
         setError(err.message);
+      } finally {
+        setLoading(false);
       }
     }
 
@@ -391,20 +431,20 @@
       h('div', {className: 'ph'},
         h('div', null,
           h('div', {className: 'ptitle'}, 'Executive Overview'),
-          h('div', {className: 'psub'}, h('span', {className: 'ldot'}), updatedAt ? `Live - atualizado ${updatedAt.toLocaleTimeString('pt-BR')}` : 'Sincronizando fontes live...')
+          h('div', {className: 'psub'}, h('span', {className: 'ldot'}), loading ? `Updating ${range} telemetry...` : updatedAt ? `Live - updated ${updatedAt.toLocaleTimeString('pt-BR')}` : 'Syncing live sources...')
         ),
         h('div', {className: 'ha'}, h(TimeSelector, {value: range, onChange: setRange}), h('button', {className: 'btn'}, 'Export Report'), h('button', {className: 'btn btnp'}, 'Open Service Request'))
       ),
       h('div', {className: 'krow'},
-        h(KpiCard, {label: 'P1 - Critical Incidents', value: fmtNum(kpis.critical_incidents), detail: `<span class="up">${fmtNum(kpis.events ?? kpis.events_24h)}</span> alertas ${data?.range || range}`, critical: true}),
-        h(KpiCard, {label: 'MTTD', value: kpis.mttd || 'N/A', detail: `<span class="dn">${kpis.mttd_detail || 'Sem lifecycle de incidente'}</span>`}),
-        h(KpiCard, {label: 'MTTR', value: kpis.mttr || 'N/A', detail: status.shuffle ? `<span class="dn">${kpis.mttr_detail || 'Aguardando tickets resolvidos'}</span>` : '<span class="up">Shuffle parcial</span>'}),
-        h(KpiCard, {label: 'SLA Compliance', value: kpis.sla_compliance == null ? 'N/A' : `${kpis.sla_compliance}%`, detail: `<span class="dn">${kpis.sla_detail || 'Sem alertas mensuraveis'} - target ${kpis.sla_target || 95}%</span>`, tone: 'green'}),
-        h(KpiCard, {label: 'Monitored Assets', value: fmtNum(kpis.monitored_assets), detail: `<span class="up">${fmtNum(kpis.assets_alerting)}</span> em alerta`})
+        h(KpiCard, {label: 'P1 - Critical Incidents', value: fmtNum(kpis.critical_incidents), detail: `<span class="up">${fmtNum(kpis.events ?? kpis.events_24h)}</span> alerts ${data?.range || range}`, critical: true}),
+        h(KpiCard, {label: 'MTTD', value: kpis.mttd || 'N/A', detail: `<span class="dn">${kpis.mttd_detail || 'Incident lifecycle unavailable'}</span>`}),
+        h(KpiCard, {label: 'MTTR', value: kpis.mttr || 'N/A', detail: status.shuffle ? `<span class="dn">${kpis.mttr_detail || 'Waiting for resolved tickets'}</span>` : '<span class="up">Shuffle parcial</span>'}),
+        h(KpiCard, {label: 'SLA Compliance', value: kpis.sla_compliance == null ? 'N/A' : `${kpis.sla_compliance}%`, detail: `<span class="dn">${kpis.sla_detail || 'No measurable alerts'} - target ${kpis.sla_target || 95}%</span>`, tone: 'green'}),
+        h(KpiCard, {label: 'Monitored Assets', value: fmtNum(kpis.monitored_assets), detail: `<span class="up">${fmtNum(kpis.assets_alerting)}</span> in alert state`})
       ),
       h('div', {className: 'aibox'},
         h('strong', null, 'SPARK Live Triage: '),
-        error ? `erro ao atualizar (${error}). Mantendo ultimo estado.` : (data?.triage || 'Carregando telemetria real...')
+        error ? `update error (${error}). Keeping last state.` : (data?.triage || 'Loading live telemetry...')
       ),
       h('div', {className: 'source-strip'},
         h(SourceBadge, {label: 'Wazuh', ok: status.wazuh}),

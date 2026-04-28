@@ -301,13 +301,13 @@ def executive_overview():
 
     top_alert = alerts[0] if alerts else {}
     triage = (
-        f"Wazuh Indexer: {alert_data.get('total', 0)} alertas no intervalo {time_range}. "
+        f"Wazuh Indexer: {alert_data.get('total', 0)} alerts in {time_range}. "
         f"P1: {alert_data.get('p1', 0)} | P2: {alert_data.get('p2', 0)}. "
-        f"FortiGate: CPU {fortigate_data.get('cpu', 0)}%, memoria {fortigate_data.get('mem', 0)}%, "
-        f"{fortigate_data.get('sessions', 0)} sessoes ativas."
+        f"FortiGate: CPU {fortigate_data.get('cpu', 0)}%, memory {fortigate_data.get('mem', 0)}%, "
+        f"{fortigate_data.get('sessions', 0)} active sessions."
     )
     if top_alert:
-        triage += f" Ultimo alerta: {top_alert.get('description', 'Wazuh alert')}."
+        triage += f" Latest alert: {top_alert.get('description', 'Wazuh alert')}."
 
     payload = {
         "source": "live",
@@ -317,11 +317,11 @@ def executive_overview():
         "kpis": {
             "critical_incidents": alert_data.get("p1", 0),
             "mttd": "N/A",
-            "mttd_detail": "Aguardando timestamps de incidente",
+            "mttd_detail": "Incident lifecycle timestamps unavailable",
             "mttr": "N/A",
-            "mttr_detail": "Aguardando fechamento de tickets",
+            "mttr_detail": "Resolved incident tickets unavailable",
             "sla_compliance": sla_summary.get("compliance"),
-            "sla_detail": f"{sla_summary.get('within', 0)}/{sla_summary.get('measurable', 0)} dentro da politica",
+            "sla_detail": f"{sla_summary.get('within', 0)}/{sla_summary.get('measurable', 0)} within escalation policy",
             "sla_target": 95,
             "monitored_assets": agents.get("total", 0),
             "assets_alerting": agents.get("disconnected", 0) + agents.get("pending", 0),

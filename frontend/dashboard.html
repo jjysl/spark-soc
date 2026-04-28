@@ -107,6 +107,10 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
 .wq-filter{display:flex;gap:5px;align-items:center}
 .wq-filter button{font-family:'Inter',sans-serif;font-size:10px;font-weight:700;border:1px solid var(--border);border-radius:999px;background:#fff;color:var(--t2);padding:4px 8px;cursor:pointer;text-transform:uppercase;letter-spacing:.04em}
 .wq-filter button.active{background:#1a1f2e;color:#fff;border-color:#1a1f2e}
+.filter-tokens{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 14px;border-bottom:1px solid var(--border);background:#fff}
+.filter-token{display:inline-flex;align-items:center;gap:6px;border:1px solid #bfdbfe;background:#eff6ff;color:#1e40af;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:700}
+.filter-token button{border:none;background:transparent;color:#1e40af;cursor:pointer;font-weight:700}
+.detail-filter{margin-top:5px;border:1px solid var(--border);background:#f8fafc;color:var(--blue);border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;cursor:pointer}
 .detail-tabs{display:flex;gap:4px;margin-bottom:10px}
 .detail-tabs button{font-family:'Inter',sans-serif;font-size:11px;font-weight:600;border:1px solid var(--border);background:#fff;color:var(--t2);border-radius:var(--r);padding:5px 10px;cursor:pointer}
 .detail-tabs button.active{background:#1a1f2e;color:#fff;border-color:#1a1f2e}
@@ -341,7 +345,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
     <div style="display:flex;align-items:center;gap:8px;margin-left:4px">
       <div class="av" id="userAvatar">...</div>
       <div style="display:flex;flex-direction:column;line-height:1.2">
-        <span id="userName" style="font-size:11px;font-weight:600;color:#0d1421">Carregando...</span>
+        <span id="userName" style="font-size:11px;font-weight:600;color:#0d1421">Loading...</span>
         <span id="userRole" style="font-size:10px;color:#8a95a3;text-transform:capitalize"></span>
       </div>
       <button onclick="doLogout()" title="Sair" style="background:none;border:1px solid #e2e5ea;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:11px;color:#4a5568;font-family:'Inter',sans-serif;margin-left:4px">Sair</button>
@@ -355,7 +359,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
   <button class="tbtn" onclick="switchTab('network',this)">Network &amp; Endpoint</button>
   <button class="tbtn" onclick="switchTab('ir',this)">Incident Response</button>
   <button class="tbtn" onclick="switchTab('compliance',this)">Compliance &amp; Risk</button>
-  <button class="tbtn" onclick="switchTab('jira',this)">Tickets de Incidentes</button>
+  <button class="tbtn" onclick="switchTab('jira',this)">Incident Tickets</button>
 </nav>
 
 <main class="main">
@@ -364,7 +368,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
 <div class="panel active" id="panel-exec">
   <div id="executive-root">
     <div class="ph">
-      <div><div class="ptitle">Executive Overview</div><div class="psub"><span class="ldot"></span>Sincronizando Wazuh, FortiGate e Shuffle...</div></div>
+      <div><div class="ptitle">Executive Overview</div><div class="psub"><span class="ldot"></span>Syncing Wazuh, FortiGate and Shuffle telemetry...</div></div>
       <div class="ha">
         <div class="tsel"><span class="active">24h</span></div>
         <button class="btn" disabled>Export Report</button>
@@ -372,13 +376,13 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
       </div>
     </div>
     <div class="krow">
-      <div class="kpi ka"><div class="kl">P1 - Critical Incidents</div><div class="kv">...</div><div class="kd">Carregando dados live</div></div>
-      <div class="kpi"><div class="kl">MTTD</div><div class="kv">...</div><div class="kd">Aguardando Wazuh</div></div>
-      <div class="kpi"><div class="kl">MTTR</div><div class="kv">...</div><div class="kd">Aguardando Shuffle</div></div>
+      <div class="kpi ka"><div class="kl">P1 - Critical Incidents</div><div class="kv">...</div><div class="kd">Loading live data</div></div>
+      <div class="kpi"><div class="kl">MTTD</div><div class="kv">...</div><div class="kd">Waiting for Wazuh</div></div>
+      <div class="kpi"><div class="kl">MTTR</div><div class="kv">...</div><div class="kd">Waiting for Shuffle</div></div>
       <div class="kpi"><div class="kl">SLA Compliance</div><div class="kv">...</div><div class="kd">Calculando</div></div>
-      <div class="kpi"><div class="kl">Monitored Assets</div><div class="kv">...</div><div class="kd">Aguardando agentes</div></div>
+      <div class="kpi"><div class="kl">Monitored Assets</div><div class="kv">...</div><div class="kd">Waiting for agents</div></div>
     </div>
-    <div class="aibox"><strong>SPARK Live Triage:</strong> carregando telemetria real...</div>
+    <div class="aibox"><strong>SPARK Live Triage:</strong> loading live telemetry...</div>
   </div>
 </div>
 <!-- ═══════════ TAB 2 — THREAT DETECTION ═══════════ -->
@@ -539,7 +543,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
   <div class="ph">
     <div><div class="ptitle">Tickets de Incidentes</div><div class="psub"><span class="ldot"></span>Jira REST API · AI Auto-fill · Bloqueio de IP · Escalonamento · Resposta a Atividades Suspeitas</div></div>
     <div class="ha">
-      <button class="btn" onclick="syncJiraTickets()">Sincronizar</button>
+      <button class="btn" onclick="syncJiraTickets()">Sync</button>
       <button class="btn btnj" onclick="openNewTicket()">+ Novo Ticket</button>
     </div>
   </div>
@@ -596,7 +600,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
   </div>
 
   <!-- AI BOX -->
-  <div class="aibox" id="jiraAiBox"><strong>IA SOC Analyst:</strong> Pronto para analisar alertas ativos e sugerir tickets. Clique em "+ Novo Ticket" para criar um ticket com auto-preenchimento inteligente baseado nos incidentes detectados.</div>
+  <div class="aibox" id="jiraAiBox"><strong>AI SOC Analyst:</strong> Ready to analyze active alerts and suggest incident tickets. Click "+ New Ticket" to create an AI-assisted ticket from detected incidents.</div>
 
   <!-- FILTERS -->
   <div class="jira-topbar">
@@ -658,7 +662,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
           <thead><tr><th>IP</th><th>Pais</th><th>Acao</th><th>Motivo</th><th>Analista</th><th>Hora</th><th>Status</th></tr></thead>
           <tbody id="ipBlockLog"></tbody>
         </table>
-        <div id="ipBlockEmpty" style="padding:20px;text-align:center;font-size:12px;color:var(--tm)">Nenhuma acao de bloqueio registrada nesta sessao.</div>
+        <div id="ipBlockEmpty" style="padding:20px;text-align:center;font-size:12px;color:var(--tm)">No IP block actions recorded in this session.</div>
       </div>
     </div>
     <div class="card">
@@ -671,7 +675,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
           <thead><tr><th>Ticket</th><th>Incidente</th><th>Repassado para</th><th>Motivo</th><th>Hora</th><th>Status</th></tr></thead>
           <tbody id="escalationLog"></tbody>
         </table>
-        <div id="escalationEmpty" style="padding:20px;text-align:center;font-size:12px;color:var(--tm)">Nenhum escalonamento registrado nesta sessao.</div>
+        <div id="escalationEmpty" style="padding:20px;text-align:center;font-size:12px;color:var(--tm)">No escalations recorded in this session.</div>
       </div>
     </div>
   </div>
