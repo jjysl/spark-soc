@@ -489,7 +489,13 @@
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const ticket = await response.json();
-        setMessage(`Service request ${ticket.id} created.`);
+        setMessage(`Service request ${ticket.id} created. Opening Incident Tickets.`);
+        window.dispatchEvent(new CustomEvent('spark:tickets-refresh'));
+        setTimeout(() => {
+          const buttons = Array.from(document.querySelectorAll('.tbtn'));
+          const ticketsButton = buttons.find(button => button.textContent.includes('Incident Tickets'));
+          if (ticketsButton) ticketsButton.click();
+        }, 300);
       } catch (error) {
         setMessage(`Service request failed: ${error.message}`);
       }

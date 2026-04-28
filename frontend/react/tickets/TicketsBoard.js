@@ -151,6 +151,9 @@
 
     useEffect(() => {
       load().catch(err => setMessage(`Ticket API unavailable: ${err.message}`));
+      const refresh = () => load().catch(err => setMessage(`Ticket API unavailable: ${err.message}`));
+      window.addEventListener('spark:tickets-refresh', refresh);
+      return () => window.removeEventListener('spark:tickets-refresh', refresh);
     }, []);
 
     async function saveTicket() {

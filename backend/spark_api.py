@@ -63,8 +63,6 @@ def _badge_from_priority(priority: str) -> str:
 def _status_label(status: str, sla_state: str) -> str:
     if status == "closed":
         return "Closed"
-    if sla_state == "breached":
-        return "SLA Breached"
     return {
         "new": "New",
         "investigating": "Investigating",
@@ -142,7 +140,7 @@ def _build_workqueue(cases: list[dict]) -> tuple[list[dict], dict]:
             "fillClass": fill_class,
             "slaPct": fill_pct,
             "status": status,
-            "statusBadge": "bcrit" if sla_state == "breached" else "binv" if status == "Investigating" else "bnew",
+            "statusBadge": "bdone" if status == "Closed" else "binv" if status in {"Investigating", "Acknowledged"} else "bnew",
             "fullLog": case.get("raw_summary", ""),
         })
 
