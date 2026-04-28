@@ -113,7 +113,12 @@
     );
   }
 
-  function WorkqueueTable({items, onCaseUpdate}) {
+  function currentOwnerName() {
+    const value = document.getElementById('userName')?.textContent?.trim();
+    return value && value !== 'Loading...' ? value : 'SOC Analyst';
+  }
+
+  function WorkqueueTable({items, onCaseUpdate, onServiceRequest}) {
     const [openId, setOpenId] = useState(null);
     const [query, setQuery] = useState('');
     const [priority, setPriority] = useState('all');
@@ -181,7 +186,8 @@
       }
       const actions = h('div', {style: {display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12}},
         h('button', {className: 'btn', onClick: event => { event.stopPropagation(); updateCase({status: 'investigating'}); }}, 'Start Investigation'),
-        h('button', {className: 'btn', onClick: event => { event.stopPropagation(); updateCase({owner: 'SOC Analyst'}); }}, 'Assign Owner'),
+        h('button', {className: 'btn', onClick: event => { event.stopPropagation(); updateCase({owner: currentOwnerName()}); }}, 'Assign to Me'),
+        h('button', {className: 'btn', onClick: event => { event.stopPropagation(); onServiceRequest && onServiceRequest(item); }}, 'Create Service Request'),
         h('button', {className: 'btn btnp', onClick: event => { event.stopPropagation(); updateCase({status: 'closed'}); }}, 'Close Case'),
         actionState ? h('span', {style: {fontSize: 11, color: 'var(--tm)'}}, actionState) : null
       );
@@ -464,27 +470,26 @@
       setMessage('Executive report exported as JSON.');
     }
 
-    async function openServiceRequest() {
-      const topCase = workqueue[0];
-      if (!topCase) {
+    async function createServiceRequest(targetCase) {
+      if (!targetCase) {
         setMessage('No open case available for service request.');
         return;
       }
-      setMessage('Creating service request...');
+      setMessage(`Creating service request for ${targetCase.id}...`);
       try {
         const response = await fetch('/spark/tickets', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           credentials: 'include',
           body: JSON.stringify({
-            title: `Service request for ${topCase.id}: ${topCase.description}`,
-            priority: String(topCase.priority || 'P3').toLowerCase(),
+            title: `Service request for ${targetCase.id}: ${targetCase.description}`,
+            priority: String(targetCase.priority || 'P3').toLowerCase(),
             type: 'incident',
-            assignee: topCase.analyst === 'Unassigned' ? 'SOC' : topCase.analyst,
-            incidentLink: topCase.id,
-            mitre: topCase.tactic || '',
-            ip: topCase.srcIp || topCase.agentIp || '',
-            desc: `Opened from Executive Overview workqueue case ${topCase.id}. SLA: ${topCase.sla}. Status: ${topCase.status}.`,
+            assignee: targetCase.analyst === 'Unassigned' ? currentOwnerName() : targetCase.analyst,
+            incidentLink: targetCase.id,
+            mitre: targetCase.tactic || '',
+            ip: targetCase.srcIp || targetCase.agentIp || '',
+            desc: `Opened from Executive Overview workqueue case ${targetCase.id}. SLA: ${targetCase.sla}. Status: ${targetCase.status}.`,
           }),
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -499,6 +504,10 @@
       } catch (error) {
         setMessage(`Service request failed: ${error.message}`);
       }
+    }
+
+    function openServiceRequest() {
+      createServiceRequest(workqueue[0]);
     }
 
     const kpis = data?.kpis || {};
@@ -544,7 +553,7 @@
         h(SourceBadge, {label: 'Shuffle', ok: status.shuffle})
       ),
       h('div', {className: 'g21'}, h(PostureScore, {data}), h(AlertVolumeChart, {timeline, total: (kpis.events ?? kpis.events_24h) || 0, range: data?.range || range})),
-      h(WorkqueueTable, {items: workqueue, onCaseUpdate: () => load(range, true)})
+      h(WorkqueueTable, {items: workqueue, onCaseUpdate: () => load(range, true), onServiceRequest: createServiceRequest})
     );
   }
 
