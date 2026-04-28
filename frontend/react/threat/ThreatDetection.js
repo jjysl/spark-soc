@@ -52,7 +52,16 @@
     if (!chain && !alert) {
       return h('div', {style: {fontSize: 12, color: 'var(--tm)'}}, 'No active alert in the selected range.');
     }
-    const stages = chain?.stages || [];
+    const stages = chain?.stages?.length ? chain.stages : [
+      {
+        name: alert?.mitre_tactic || 'Detection',
+        detail: `${alert?.description || 'Wazuh detection'} - ${alert?.agent_name || alert?.location || 'observed asset'} - ${alert?.mitre_technique || 'no MITRE technique'}`,
+        state: 'active',
+        document_id: alert?.document_id || '',
+        src_ip: alert?.src_ip || '',
+        agent_name: alert?.agent_name || '',
+      },
+    ];
     return h(React.Fragment, null,
       h('div', {style: {display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 12}},
         h('div', null,
@@ -61,8 +70,8 @@
         ),
         h('span', {className: `badge ${clsPriority(chain?.priority || alert?.priority)}`}, chain?.priority || alert?.priority || 'P3')
       ),
-      stages.map((stage, idx) => h('div', {className: 'kcstep', key: stage.name},
-        h('div', {className: `kcicon ${stage.state === 'active' ? 'act' : stage.state === 'done' ? 'done' : ''}`}, stage.state === 'pending' ? '...' : '✓'),
+      stages.map(stage => h('div', {className: 'kcstep', key: `${stage.name}-${stage.document_id || stage.state}`},
+        h('div', {className: `kcicon ${stage.state === 'active' ? 'act' : stage.state === 'done' ? 'done' : 'pend'}`}, stage.state === 'pending' ? '...' : stage.state === 'active' ? '>' : 'OK'),
         h('div', null,
           h('div', {className: 'kct'}, stage.name),
           h('div', {className: 'kcs'}, stage.detail),
@@ -274,6 +283,89 @@
     );
   }
 
+  function extractIndicators(alerts) {
+    const privateIp = /^(10\.|127\.|172\.(1[6-9]|2\d|3[0-1])\.|192\.168\.|169\.254\.)/;
+    const ipLike = value => /^\d{1,3}(\.\d{1,3}){3}$/.test(String(value || '')) && !privateIp.test(String(value || ''));
+    const domainRegex = /\b(?:[a-z0-9-]+\.)+(?:com|net|org|io|co|ru|cn|br|info|biz|xyz)\b/gi;
+    const hashRegex = /\b[a-fA-F0-9]{32}\b|\b[a-fA-F0-9]{40}\b|\b[a-fA-F0-9]{64}\b/g;
+    const cveRegex = /\bCVE-\d{4}-\d{4,7}\b/gi;
+    const ips = new Set();
+    const domains = new Set();
+    const hashes = new Set();
+    const cves = new Set();
+
+    (alerts || []).forEach(alert => {
+      [alert.src_ip, alert.dst_ip].forEach(ip => {
+        if (ipLike(ip)) ips.add(ip);
+      });
+      const text = `${alert.description || ''} ${alert.full_log || ''} ${JSON.stringify(alert.raw || {})}`;
+      (text.match(domainRegex) || []).forEach(domain => {
+        const clean = domain.toLowerCase();
+        if (!clean.includes('wazuh.com') && !clean.includes('opensearch.org')) domains.add(clean);
+      });
+      (text.match(hashRegex) || []).forEach(hash => hashes.add(hash.toLowerCase()));
+      (text.match(cveRegex) || []).forEach(cve => cves.add(cve.toUpperCase()));
+    });
+
+    return {ips: [...ips], domains: [...domains], hashes: [...hashes], cves: [...cves]};
+  }
+
+  function ThreatIntelFeed({data}) {
+    const canvasRef = useRef(null);
+    const chartRef = useRef(null);
+    const alerts = data?.alerts || [];
+    const indicators = useMemo(() => extractIndicators(alerts), [alerts]);
+    const timeline = data?.timeline || [];
+
+    useEffect(() => {
+      if (!canvasRef.current || !window.Chart) return;
+      const rows = timeline.slice(-24);
+      const labels = rows.map(row => row.time && row.time.length >= 13 ? row.time.substring(11, 16) : '--');
+      const chartData = {
+        labels,
+        datasets: [
+          {label: 'Malicious IPs', data: rows.map(row => (row.critical || 0) + (row.high || 0)), borderColor: '#da291c', backgroundColor: 'rgba(218,41,28,0.08)', borderWidth: 1.5, pointRadius: 2, tension: .3, fill: true},
+          {label: 'Malicious Domains', data: rows.map(row => (row.medium || 0) + (row.low || 0)), borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.07)', borderWidth: 1.5, pointRadius: 2, tension: .3, fill: true},
+        ],
+      };
+      if (chartRef.current) {
+        chartRef.current.data = chartData;
+        chartRef.current.update();
+        return;
+      }
+      chartRef.current = new Chart(canvasRef.current.getContext('2d'), {
+        type: 'line',
+        data: chartData,
+        options: {responsive: true, maintainAspectRatio: true, animation: {duration: 400}, plugins: {legend: {position: 'top', align: 'end', labels: {boxWidth: 10, boxHeight: 10, font: {size: 10, family: 'Inter'}, padding: 10}}}, scales: {x: {grid: {display: false}, ticks: {font: {size: 10, family: 'Inter'}, color: '#8a95a3'}}, y: {grid: {color: '#e2e5ea', lineWidth: .5}, ticks: {font: {size: 10}, color: '#8a95a3'}, border: {display: false}}}},
+      });
+      return () => {
+        if (chartRef.current) {
+          chartRef.current.destroy();
+          chartRef.current = null;
+        }
+      };
+    }, [timeline]);
+
+    return h('div', {className: 'card'},
+      h('div', {className: 'ch'},
+        h('div', null,
+          h('div', {className: 'ct'}, 'FortiGuard Threat Intelligence Feed'),
+          h('div', {className: 'cs'}, 'IOC enrichment - outbreak alerts - FortiGuard Labs')
+        ),
+        h('span', {className: `badge ${data?.source === 'opensearch-live' ? 'blive' : 'bhigh'}`}, data?.source === 'opensearch-live' ? 'Live' : 'Offline')
+      ),
+      h('div', {className: 'cb'},
+        h('div', {className: 'cwrap', style: {padding: '0 0 14px'}}, h('canvas', {ref: canvasRef})),
+        h('div', {style: {display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', textAlign: 'center', borderTop: '1px solid var(--border)', paddingTop: 12}},
+          h('div', {style: {borderRight: '1px solid var(--border)', padding: '0 8px'}}, h('div', {style: {fontSize: 16, fontWeight: 600, color: 'var(--red)'}}, fmtNum(indicators.ips.length)), h('div', {style: {fontSize: 10, color: 'var(--tm)', marginTop: 2}}, 'Malicious IPs')),
+          h('div', {style: {borderRight: '1px solid var(--border)', padding: '0 8px'}}, h('div', {style: {fontSize: 16, fontWeight: 600, color: 'var(--amber)'}}, fmtNum(indicators.domains.length)), h('div', {style: {fontSize: 10, color: 'var(--tm)', marginTop: 2}}, 'Malicious Domains')),
+          h('div', {style: {borderRight: '1px solid var(--border)', padding: '0 8px'}}, h('div', {style: {fontSize: 16, fontWeight: 600, color: 'var(--blue)'}}, fmtNum(indicators.hashes.length)), h('div', {style: {fontSize: 10, color: 'var(--tm)', marginTop: 2}}, 'File Hashes')),
+          h('div', {style: {padding: '0 8px'}}, h('div', {style: {fontSize: 16, fontWeight: 600, color: 'var(--t2)'}}, fmtNum(indicators.cves.length)), h('div', {style: {fontSize: 10, color: 'var(--tm)', marginTop: 2}}, 'Active CVEs'))
+        )
+      )
+    );
+  }
+
   function ThreatDetectionApp() {
     const [range, setRange] = useState('24h');
     const [searchInput, setSearchInput] = useState('');
@@ -359,7 +451,7 @@
       ),
       h('div', {className: 'g11'},
         h(AlertFeed, {alerts: payload.alerts || [], total: payload.total || 0, filters, setFilters, search: searchInput, setSearch: setSearchInput, range, setRange}),
-        h(SeverityTrend, {data: payload})
+        h(ThreatIntelFeed, {data: payload})
       )
     );
   }
