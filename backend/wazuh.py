@@ -12,6 +12,23 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _token_cache: dict = {"token": None, "time": 0}
+THREAT_FILTER_FIELDS = {
+    "rule.id": "rule.id",
+    "rule.level": "rule.level",
+    "rule.groups": "rule.groups",
+    "agent.id": "agent.id",
+    "agent.name": "agent.name",
+    "agent.ip": "agent.ip",
+    "manager.name": "manager.name",
+    "decoder.name": "decoder.name",
+    "location": "location",
+    "data.srcip": "data.srcip",
+    "data.dstip": "data.dstip",
+    "data.src_ip": "data.src_ip",
+    "data.dst_ip": "data.dst_ip",
+    "mitre.tactic": "rule.mitre.tactic",
+    "mitre.technique": "rule.mitre.id",
+}
 
 
 # ── Token Wazuh Manager API ────────────────────────────────────────────────
@@ -260,6 +277,280 @@ def get_executive_alerts(indexer_base: str, user: str, password: str, time_range
         "p3": p3,
         "alerts": alerts,
         "timeline": timeline,
+    }
+
+
+def _list_first(value) -> str:
+    if isinstance(value, list):
+        return str(value[0]) if value else ""
+    return str(value) if value is not None else ""
+
+
+def _severity_from_level(level: int) -> dict:
+    if level >= 12:
+        return {"label": "Critical", "class": "bcrit", "priority": "P1"}
+    if level >= 7:
+        return {"label": "High", "class": "bhigh", "priority": "P2"}
+    if level >= 4:
+        return {"label": "Medium", "class": "bmed", "priority": "P3"}
+    return {"label": "Low", "class": "blow", "priority": "P4"}
+
+
+def _normalize_threat_hit(hit: dict) -> dict:
+    src = hit.get("_source", {})
+    rule = src.get("rule", {})
+    agent = src.get("agent", {})
+    data = src.get("data", {})
+    manager = src.get("manager", {})
+    decoder = src.get("decoder", {})
+    mitre = rule.get("mitre", {})
+    level = int(rule.get("level") or 0)
+    severity = _severity_from_level(level)
+    src_ip = data.get("srcip") or data.get("src_ip") or agent.get("ip") or ""
+    dst_ip = data.get("dstip") or data.get("dst_ip") or ""
+    tactic = _list_first(mitre.get("tactic", [])) or "Detection"
+    technique = _list_first(mitre.get("id", []))
+    description = rule.get("description") or src.get("full_log") or "Wazuh alert"
+    return {
+        "document_id": hit.get("_id", ""),
+        "index": hit.get("_index", ""),
+        "timestamp": src.get("timestamp", ""),
+        "rule_id": rule.get("id", ""),
+        "description": description,
+        "level": level,
+        "severity": severity["label"],
+        "severity_class": severity["class"],
+        "priority": severity["priority"],
+        "groups": rule.get("groups", []),
+        "agent_id": agent.get("id", ""),
+        "agent_name": agent.get("name", "unknown"),
+        "agent_ip": agent.get("ip", ""),
+        "manager_name": manager.get("name", ""),
+        "decoder_name": decoder.get("name", ""),
+        "location": src.get("location", ""),
+        "src_ip": src_ip,
+        "dst_ip": dst_ip,
+        "src_port": data.get("srcport", ""),
+        "dst_port": data.get("dstport", ""),
+        "mitre_tactic": tactic,
+        "mitre_technique": technique,
+        "full_log": src.get("full_log", ""),
+        "status": "Investigating" if level >= 7 else "New",
+        "status_class": "binv" if level >= 7 else "bnew",
+        "summary": f"{description} on {agent.get('name', 'unknown')} ({src_ip or 'no source IP'})",
+        "raw": src,
+    }
+
+
+def get_threat_detection_alerts(
+    indexer_base: str,
+    user: str,
+    password: str,
+    time_range: str = "24h",
+    search: str = "",
+    filters: list[tuple[str, str]] | None = None,
+    size: int = 100,
+) -> dict:
+    allowed_ranges = {"1h", "6h", "24h", "7d", "30d"}
+    if time_range not in allowed_ranges:
+        time_range = "24h"
+    size = max(1, min(int(size or 100), 250))
+    filters = filters or []
+
+    must = [{"range": {"timestamp": {"gte": f"now-{time_range}", "lte": "now"}}}]
+    if search:
+        must.append({
+            "simple_query_string": {
+                "query": f"*{search}*",
+                "fields": [
+                    "rule.description", "rule.id", "rule.groups",
+                    "agent.name", "agent.ip", "decoder.name", "location",
+                    "full_log", "data.srcip", "data.dstip",
+                    "data.src_ip", "data.dst_ip",
+                ],
+                "default_operator": "AND",
+            }
+        })
+    for field, value in filters:
+        if value == "":
+            continue
+        if field == "src_ip":
+            must.append({"bool": {"should": [
+                {"term": {"data.srcip": value}},
+                {"term": {"data.src_ip": value}},
+                {"term": {"agent.ip": value}},
+            ], "minimum_should_match": 1}})
+            continue
+        if field == "dst_ip":
+            must.append({"bool": {"should": [
+                {"term": {"data.dstip": value}},
+                {"term": {"data.dst_ip": value}},
+            ], "minimum_should_match": 1}})
+            continue
+        os_field = THREAT_FILTER_FIELDS.get(field)
+        if os_field:
+            must.append({"term": {os_field: value}})
+
+    interval = "hour" if time_range in {"1h", "6h", "24h"} else "day"
+    query = {
+        "size": size,
+        "sort": [{"timestamp": {"order": "desc"}}],
+        "query": {"bool": {"must": must}},
+        "aggs": {
+            "levels": {"terms": {"field": "rule.level", "size": 20}},
+            "tactics": {"terms": {"field": "rule.mitre.tactic", "size": 20}},
+            "groups": {"terms": {"field": "rule.groups", "size": 20}},
+            "decoders": {"terms": {"field": "decoder.name", "size": 20}},
+            "timeline": {
+                "date_histogram": {
+                    "field": "timestamp",
+                    "calendar_interval": interval,
+                    "min_doc_count": 0,
+                },
+                "aggs": {"levels": {"terms": {"field": "rule.level", "size": 20}}},
+            },
+        },
+    }
+    resp = requests.post(
+        f"{indexer_base}/wazuh-alerts-4.x-*/_search",
+        json=query,
+        auth=(user, password),
+        verify=False,
+        timeout=15,
+    )
+    resp.raise_for_status()
+    raw = resp.json()
+    hits = raw.get("hits", {}).get("hits", [])
+    alerts = [_normalize_threat_hit(hit) for hit in hits]
+
+    aggs = raw.get("aggregations", {})
+    level_buckets = aggs.get("levels", {}).get("buckets", [])
+    levels = {str(bucket.get("key")): bucket.get("doc_count", 0) for bucket in level_buckets}
+    p1 = sum(count for level, count in levels.items() if int(level) >= 12)
+    p2 = sum(count for level, count in levels.items() if 7 <= int(level) < 12)
+    p3 = sum(count for level, count in levels.items() if 4 <= int(level) < 7)
+    p4 = sum(count for level, count in levels.items() if int(level) < 4)
+
+    timeline = []
+    for bucket in aggs.get("timeline", {}).get("buckets", []):
+        bucket_levels = {
+            str(item.get("key")): item.get("doc_count", 0)
+            for item in bucket.get("levels", {}).get("buckets", [])
+        }
+        timeline.append({
+            "time": bucket.get("key_as_string", ""),
+            "critical": sum(v for k, v in bucket_levels.items() if int(k) >= 12),
+            "high": sum(v for k, v in bucket_levels.items() if 7 <= int(k) < 12),
+            "medium": sum(v for k, v in bucket_levels.items() if 4 <= int(k) < 7),
+            "low": sum(v for k, v in bucket_levels.items() if int(k) < 4),
+        })
+
+    total = raw.get("hits", {}).get("total", {})
+    total_value = total.get("value", len(alerts)) if isinstance(total, dict) else total
+    top_alert = alerts[0] if alerts else None
+    if top_alert:
+        triage = (
+            f"Wazuh Indexer returned {total_value} alerts in {time_range}. "
+            f"P1: {p1} | P2: {p2}. Latest: {top_alert.get('description')}."
+        )
+    else:
+        triage = f"Wazuh Indexer returned no alerts in {time_range} for the current filters."
+    return {
+        "source": "opensearch-live",
+        "range": time_range,
+        "total": total_value,
+        "returned": len(alerts),
+        "filters": [{"field": field, "value": value} for field, value in filters],
+        "search": search,
+        "counts": {"p1": p1, "p2": p2, "p3": p3, "p4": p4},
+        "levels": levels,
+        "facets": {
+            "tactics": aggs.get("tactics", {}).get("buckets", []),
+            "groups": aggs.get("groups", {}).get("buckets", []),
+            "decoders": aggs.get("decoders", {}).get("buckets", []),
+        },
+        "timeline": timeline,
+        "alerts": alerts,
+        "triage": triage,
+    }
+
+
+def get_compliance_risk_events(
+    indexer_base: str,
+    user: str,
+    password: str,
+    time_range: str = "7d",
+    size: int = 50,
+) -> dict:
+    allowed_ranges = {"1h", "6h", "24h", "7d", "30d"}
+    if time_range not in allowed_ranges:
+        time_range = "7d"
+    size = max(1, min(int(size or 50), 150))
+    compliance_groups = [
+        "sca",
+        "syscheck",
+        "rootcheck",
+        "vulnerability-detector",
+        "audit",
+        "policy_monitoring",
+        "osquery",
+    ]
+    should = [{"term": {"rule.groups": group}} for group in compliance_groups]
+    query = {
+        "size": size,
+        "sort": [{"timestamp": {"order": "desc"}}],
+        "query": {
+            "bool": {
+                "must": [{"range": {"timestamp": {"gte": f"now-{time_range}", "lte": "now"}}}],
+                "should": should,
+                "minimum_should_match": 1,
+            }
+        },
+        "aggs": {
+            "groups": {"terms": {"field": "rule.groups", "size": 30}},
+            "levels": {"terms": {"field": "rule.level", "size": 20}},
+            "agents": {"terms": {"field": "agent.name", "size": 20}},
+        },
+    }
+    resp = requests.post(
+        f"{indexer_base}/wazuh-alerts-4.x-*/_search",
+        json=query,
+        auth=(user, password),
+        verify=False,
+        timeout=15,
+    )
+    resp.raise_for_status()
+    raw = resp.json()
+    hits = raw.get("hits", {}).get("hits", [])
+    findings = [_normalize_threat_hit(hit) for hit in hits]
+    aggs = raw.get("aggregations", {})
+    group_counts = {
+        str(bucket.get("key")): bucket.get("doc_count", 0)
+        for bucket in aggs.get("groups", {}).get("buckets", [])
+    }
+    level_counts = {
+        str(bucket.get("key")): bucket.get("doc_count", 0)
+        for bucket in aggs.get("levels", {}).get("buckets", [])
+    }
+    total = raw.get("hits", {}).get("total", {})
+    total_value = total.get("value", len(findings)) if isinstance(total, dict) else total
+    modules = {
+        "sca": sum(v for k, v in group_counts.items() if "sca" in k),
+        "fim": sum(v for k, v in group_counts.items() if "syscheck" in k),
+        "rootcheck": sum(v for k, v in group_counts.items() if "rootcheck" in k),
+        "vulnerability": sum(v for k, v in group_counts.items() if "vulnerability" in k),
+        "audit": sum(v for k, v in group_counts.items() if "audit" in k or "policy" in k),
+    }
+    return {
+        "source": "opensearch-live",
+        "range": time_range,
+        "total": total_value,
+        "returned": len(findings),
+        "modules": modules,
+        "groups": group_counts,
+        "levels": level_counts,
+        "agents": aggs.get("agents", {}).get("buckets", []),
+        "findings": findings,
     }
 
 

@@ -197,8 +197,14 @@ def spark_wazuh_alerts():
             config.INDEXER_BASE, config.INDEXER_USER, config.INDEXER_PASS
         )
     except Exception as exc:
-        print(f"[OpenSearch] Erro: {exc}")
-        data = wazuh.get_alerts_sqlite_fallback(config.DB_PATH)
+        print(f"[OpenSearch] Error: {exc}")
+        data = {
+            "source": "offline",
+            "levels": {},
+            "alerts": [],
+            "stats": {"total": 0, "critical": 0, "auth_failures": 0, "auth_success": 0},
+            "error": str(exc),
+        }
     return jsonify(data)
 
 
@@ -207,6 +213,295 @@ def spark_wazuh_debug():
     return jsonify(
         wazuh.get_wazuh_debug(config.WAZUH_BASE, config.WAZUH_USER, config.WAZUH_PASS)
     )
+
+
+@spark_bp.route("/spark/threat-detection")
+def threat_detection():
+    time_range = request.args.get("range", "24h")
+    search = request.args.get("q", "").strip()
+    size = request.args.get("size", 100, type=int)
+    filters = []
+    for raw_filter in request.args.getlist("filter"):
+        if ":" not in raw_filter:
+            continue
+        field, value = raw_filter.split(":", 1)
+        field = field.strip()
+        value = value.strip()
+        if field and value:
+            filters.append((field, value))
+    try:
+        data = wazuh.get_threat_detection_alerts(
+            config.INDEXER_BASE,
+            config.INDEXER_USER,
+            config.INDEXER_PASS,
+            time_range,
+            search,
+            filters,
+            size,
+        )
+    except Exception as exc:
+        print(f"[Threat Detection] OpenSearch error: {exc}")
+        data = {
+            "source": "offline",
+            "range": time_range,
+            "total": 0,
+            "returned": 0,
+            "filters": [{"field": field, "value": value} for field, value in filters],
+            "search": search,
+            "counts": {"p1": 0, "p2": 0, "p3": 0, "p4": 0},
+            "levels": {},
+            "facets": {"tactics": [], "groups": [], "decoders": []},
+            "timeline": [],
+            "alerts": [],
+            "triage": "Wazuh Indexer is unavailable. Check INDEXER_BASE, INDEXER_USER and INDEXER_PASS.",
+            "error": str(exc),
+        }
+    return jsonify(data)
+
+
+@spark_bp.route("/spark/network-endpoint")
+def network_endpoint():
+    errors: dict[str, str] = {}
+    executor = ThreadPoolExecutor(max_workers=2)
+    try:
+        futures = {
+            "fortigate": executor.submit(
+                fortigate.get_resource_usage,
+                config.FORTIGATE_BASE_URL,
+                config.FORTIGATE_API_KEY,
+            ),
+            "wazuh_agents": executor.submit(
+                wazuh.get_agents_summary,
+                config.WAZUH_BASE,
+                config.WAZUH_USER,
+                config.WAZUH_PASS,
+            ),
+        }
+        try:
+            fortigate_data = futures["fortigate"].result(timeout=5)
+        except TimeoutError:
+            fortigate_data = {"source": "offline", "cpu": 0, "mem": 0, "sessions": 0, "error": "timeout"}
+        except Exception as exc:
+            fortigate_data = {"source": "offline", "cpu": 0, "mem": 0, "sessions": 0, "error": str(exc)}
+
+        try:
+            agents = futures["wazuh_agents"].result(timeout=7)
+        except TimeoutError:
+            agents = {"total": 0, "active": 0, "disconnected": 0, "pending": 0, "agents": [], "error": "timeout"}
+        except Exception as exc:
+            agents = {"total": 0, "active": 0, "disconnected": 0, "pending": 0, "agents": [], "error": str(exc)}
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    if fortigate_data.get("source") != "fortigate-live":
+        errors["fortigate"] = fortigate_data.get("error", "offline")
+        fortigate_data = {
+            "source": "offline",
+            "cpu": 0,
+            "mem": 0,
+            "sessions": 0,
+            "error": errors["fortigate"],
+        }
+    if agents.get("error"):
+        errors["wazuh_api"] = agents["error"]
+
+    agent_items = agents.get("agents", [])
+    endpoint_status = {
+        "total": agents.get("total", len(agent_items)),
+        "active": agents.get("active", 0),
+        "disconnected": agents.get("disconnected", 0),
+        "pending": agents.get("pending", 0),
+        "agents": agent_items,
+    }
+    blocked = ticket_store.get_blocked_ips()
+    return jsonify({
+        "source": "live" if not errors else "partial",
+        "errors": errors,
+        "fortigate": fortigate_data,
+        "wazuh": endpoint_status,
+        "blocked_ips": blocked,
+        "notes": {
+            "sessions": "FortiGate session endpoint is not enabled for this page until validated in the lab.",
+            "endpoint_agents": "Wazuh agent inventory reflects the Wazuh Manager API. Only real registered agents are shown.",
+        },
+    })
+
+
+@spark_bp.route("/spark/incident-response")
+def incident_response():
+    time_range = request.args.get("range", "24h")
+    if time_range not in EXECUTIVE_RANGES:
+        time_range = "24h"
+    errors: dict[str, str] = {}
+    executor = ThreadPoolExecutor(max_workers=2)
+    try:
+        futures = {
+            "shuffle": executor.submit(
+                shuffle.get_status,
+                config.SHUFFLE_BASE_URL,
+                config.SHUFFLE_API_KEY,
+            ),
+            "alerts": executor.submit(
+                wazuh.get_threat_detection_alerts,
+                config.INDEXER_BASE,
+                config.INDEXER_USER,
+                config.INDEXER_PASS,
+                time_range,
+                "",
+                [],
+                25,
+            ),
+        }
+        try:
+            shuffle_data = futures["shuffle"].result(timeout=5)
+        except TimeoutError:
+            shuffle_data = {"connected": False, "source": "shuffle", "error": "timeout"}
+        except Exception as exc:
+            shuffle_data = {"connected": False, "source": "shuffle", "error": str(exc)}
+
+        try:
+            alert_data = futures["alerts"].result(timeout=8)
+        except TimeoutError:
+            alert_data = {"total": 0, "alerts": [], "counts": {"p1": 0, "p2": 0, "p3": 0, "p4": 0}, "error": "timeout"}
+        except Exception as exc:
+            alert_data = {"total": 0, "alerts": [], "counts": {"p1": 0, "p2": 0, "p3": 0, "p4": 0}, "error": str(exc)}
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    if not shuffle_data.get("connected"):
+        errors["shuffle"] = shuffle_data.get("error", "offline")
+    if alert_data.get("error"):
+        errors["wazuh_indexer"] = alert_data["error"]
+
+    candidates = []
+    for alert in alert_data.get("alerts", []):
+        level = int(alert.get("level") or 0)
+        if level < 7:
+            continue
+        candidates.append({
+            "document_id": alert.get("document_id", ""),
+            "index": alert.get("index", ""),
+            "timestamp": alert.get("timestamp", ""),
+            "title": alert.get("description") or "Wazuh alert",
+            "priority": alert.get("priority", "P3"),
+            "severity": alert.get("severity", ""),
+            "level": level,
+            "agent_name": alert.get("agent_name", "unknown"),
+            "agent_ip": alert.get("agent_ip", ""),
+            "src_ip": alert.get("src_ip", ""),
+            "dst_ip": alert.get("dst_ip", ""),
+            "mitre_tactic": alert.get("mitre_tactic", ""),
+            "mitre_technique": alert.get("mitre_technique", ""),
+            "rule_id": alert.get("rule_id", ""),
+            "decoder_name": alert.get("decoder_name", ""),
+            "status": "Candidate",
+        })
+
+    return jsonify({
+        "source": "live" if not errors else "partial",
+        "range": time_range,
+        "errors": errors,
+        "shuffle": shuffle_data,
+        "wazuh": {
+            "total": alert_data.get("total", 0),
+            "counts": alert_data.get("counts", {}),
+            "candidate_count": len(candidates),
+            "candidates": candidates,
+        },
+        "playbooks": [],
+        "timeline": [],
+        "actions": [],
+        "notes": {
+            "playbooks": "Shuffle workflow listing/execution endpoints still need lab validation.",
+            "timeline": "Incident lifecycle timestamps are not persisted yet.",
+            "actions": "FortiGate/SOAR action execution logs are not persisted yet.",
+        },
+    })
+
+
+@spark_bp.route("/spark/compliance-risk")
+def compliance_risk():
+    time_range = request.args.get("range", "7d")
+    if time_range not in EXECUTIVE_RANGES:
+        time_range = "7d"
+    errors: dict[str, str] = {}
+    executor = ThreadPoolExecutor(max_workers=2)
+    try:
+        futures = {
+            "findings": executor.submit(
+                wazuh.get_compliance_risk_events,
+                config.INDEXER_BASE,
+                config.INDEXER_USER,
+                config.INDEXER_PASS,
+                time_range,
+                50,
+            ),
+            "agents": executor.submit(
+                wazuh.get_agents_summary,
+                config.WAZUH_BASE,
+                config.WAZUH_USER,
+                config.WAZUH_PASS,
+            ),
+        }
+        try:
+            finding_data = futures["findings"].result(timeout=8)
+        except TimeoutError:
+            finding_data = {"total": 0, "returned": 0, "modules": {}, "groups": {}, "levels": {}, "findings": [], "error": "timeout"}
+        except Exception as exc:
+            finding_data = {"total": 0, "returned": 0, "modules": {}, "groups": {}, "levels": {}, "findings": [], "error": str(exc)}
+
+        try:
+            agents = futures["agents"].result(timeout=7)
+        except TimeoutError:
+            agents = {"total": 0, "active": 0, "disconnected": 0, "pending": 0, "agents": [], "error": "timeout"}
+        except Exception as exc:
+            agents = {"total": 0, "active": 0, "disconnected": 0, "pending": 0, "agents": [], "error": str(exc)}
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    if finding_data.get("error"):
+        errors["wazuh_indexer"] = finding_data["error"]
+    if agents.get("error"):
+        errors["wazuh_api"] = agents["error"]
+
+    modules = {
+        "sca": 0,
+        "fim": 0,
+        "rootcheck": 0,
+        "vulnerability": 0,
+        "audit": 0,
+        **finding_data.get("modules", {}),
+    }
+    return jsonify({
+        "source": "live" if not errors else "partial",
+        "range": time_range,
+        "errors": errors,
+        "findings": finding_data.get("findings", []),
+        "total_findings": finding_data.get("total", 0),
+        "returned": finding_data.get("returned", 0),
+        "modules": modules,
+        "groups": finding_data.get("groups", {}),
+        "levels": finding_data.get("levels", {}),
+        "agents": {
+            "total": agents.get("total", 0),
+            "active": agents.get("active", 0),
+            "disconnected": agents.get("disconnected", 0),
+            "pending": agents.get("pending", 0),
+            "items": agents.get("agents", []),
+        },
+        "controls": [
+            {"name": "SCA policy checks", "module": "sca", "count": modules.get("sca", 0), "status": "live" if modules.get("sca", 0) else "no_data"},
+            {"name": "File integrity monitoring", "module": "fim", "count": modules.get("fim", 0), "status": "live" if modules.get("fim", 0) else "no_data"},
+            {"name": "Rootcheck / system audit", "module": "rootcheck", "count": modules.get("rootcheck", 0), "status": "live" if modules.get("rootcheck", 0) else "no_data"},
+            {"name": "Vulnerability detector", "module": "vulnerability", "count": modules.get("vulnerability", 0), "status": "live" if modules.get("vulnerability", 0) else "no_data"},
+            {"name": "Audit / policy monitoring", "module": "audit", "count": modules.get("audit", 0), "status": "live" if modules.get("audit", 0) else "no_data"},
+        ],
+        "notes": {
+            "frameworks": "ISO/PCI/LGPD/NIST percentages are not calculated until real control mappings exist.",
+            "fortigate": "FortiGate policy/configuration compliance endpoints still need endpoint discovery.",
+            "agents": "SCA, FIM, rootcheck and vulnerability data require real Wazuh endpoint agents.",
+        },
+    })
 
 
 @spark_bp.route("/spark/executive-overview")

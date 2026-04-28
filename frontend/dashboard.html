@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -184,6 +184,8 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
 
 /* API ACTIONS */
 .apirow{display:flex;align-items:center;gap:8px;margin-bottom:7px;font-size:11px;font-family:'JetBrains Mono',monospace}
+.adot{width:7px;height:7px;border-radius:50%;display:inline-block;background:var(--tm);flex-shrink:0}
+.adot.ok{background:#10b981}.adot.warn{background:#f59e0b}.adot.err{background:var(--red)}
 
 /* COMPLIANCE */
 .cbar{margin-bottom:11px}
@@ -236,7 +238,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
 ::-webkit-scrollbar{width:5px;height:5px}
 ::-webkit-scrollbar-thumb{background:var(--border-s);border-radius:3px}
 
-/* ── JIRA PANEL ── */
+/* -- JIRA PANEL -- */
 .jira-topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px}
 .jira-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .jira-filter-sel{font-family:'Inter',sans-serif;font-size:12px;padding:5px 10px;border:1px solid var(--border-s);border-radius:var(--r);background:var(--white);color:var(--t2);cursor:pointer}
@@ -364,7 +366,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
 
 <main class="main">
 
-<!-- ═══════════ TAB 1 — EXECUTIVE OVERVIEW ═══════════ -->
+<!-- ----------- TAB 1 — EXECUTIVE OVERVIEW ----------- -->
 <div class="panel active" id="panel-exec">
   <div id="executive-root">
     <div class="ph">
@@ -385,476 +387,61 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
     <div class="aibox"><strong>SPARK Live Triage:</strong> loading live telemetry...</div>
   </div>
 </div>
-<!-- ═══════════ TAB 2 — THREAT DETECTION ═══════════ -->
+<!-- ----------- TAB 2 — THREAT DETECTION ----------- -->
 <div class="panel" id="panel-threat">
-  <div class="ph">
-    <div><div class="ptitle">Threat Detection &amp; Intelligence</div><div class="psub"><span class="ldot"></span>AI-driven Automated Triage · FortiGuard Labs · Fabric Monitoring</div></div>
-    <div class="ha"><button class="btn">Threat Hunting</button><button class="btn btnp">New Triage Rule</button></div>
-  </div>
-
-  <div class="aibox"><strong>FortiGuard AI Triage:</strong> 847 MITRE ATT&amp;CK techniques mapped. Detection coverage: 73%. Coverage gaps: T1055 (Process Injection) and T1078 (Valid Accounts). Risk Adjusted Alert priority recalculated at 14:32 UTC.</div>
-
-  <div class="g12">
-    <div class="card">
-      <div class="ch"><div><div class="ct">Kill Chain — INC-2026-0183</div><div class="cs">Active incident · FortiAnalyzer correlation</div></div><span class="badge bp1">P1</span></div>
-      <div class="cb" id="killchain"></div>
+  <div id="threat-root">
+    <div class="ph">
+      <div><div class="ptitle">Threat Detection &amp; Intelligence</div><div class="psub"><span class="ldot"></span>Wazuh Indexer · normalized detections · live filters</div></div>
+      <div class="ha"><button class="btn" disabled>Threat Hunting</button><button class="btn btnp" disabled>New Triage Rule</button></div>
     </div>
-    <div class="card">
-      <div class="ch"><div><div class="ct">MITRE ATT&amp;CK Heatmap</div><div class="cs">Detection activity · last 24h · FortiGuard threat mapping</div></div><span class="ca">Full matrix</span></div>
-      <div class="cb" id="mitre-wrap"></div>
-    </div>
-  </div>
-
-  <div class="g11">
-    <div class="card">
-      <div class="ch"><div><div class="ct">Correlated Alert Feed</div><div class="cs">Wazuh + FortiGate · AI-enriched · Fabric Monitoring</div></div><span class="ca">View all</span></div>
-      <table class="ftable">
-        <thead><tr><th>Time</th><th>Description</th><th>Source IP</th><th>MITRE</th><th>Severity</th><th>Status</th></tr></thead>
-        <tbody id="alert-feed"></tbody>
-      </table>
-    </div>
-    <div class="card">
-      <div class="ch"><div><div class="ct">FortiGuard Threat Intelligence Feed</div><div class="cs">IOC enrichment · outbreak alerts · FortiGuard Labs</div></div><span class="badge blive">Live</span></div>
-      <div class="cb">
-        <div class="cwrap" style="padding:0 0 14px"><canvas id="iocChart"></canvas></div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;text-align:center;border-top:1px solid var(--border);padding-top:12px">
-          <div style="border-right:1px solid var(--border);padding:0 8px"><div style="font-size:16px;font-weight:600;color:var(--red)">47</div><div style="font-size:10px;color:var(--tm);margin-top:2px">Malicious IPs</div></div>
-          <div style="border-right:1px solid var(--border);padding:0 8px"><div style="font-size:16px;font-weight:600;color:var(--amber)">23</div><div style="font-size:10px;color:var(--tm);margin-top:2px">Malicious Domains</div></div>
-          <div style="border-right:1px solid var(--border);padding:0 8px"><div style="font-size:16px;font-weight:600;color:var(--blue)">11</div><div style="font-size:10px;color:var(--tm);margin-top:2px">File Hashes</div></div>
-          <div style="padding:0 8px"><div style="font-size:16px;font-weight:600;color:var(--t2)">8</div><div style="font-size:10px;color:var(--tm);margin-top:2px">Active CVEs</div></div>
-        </div>
-      </div>
-    </div>
+    <div class="aibox loading"><strong>SPARK Threat Triage:</strong> Loading Wazuh Indexer alerts.</div>
   </div>
 </div>
 
-<!-- ═══════════ TAB 3 — NETWORK & ENDPOINT ═══════════ -->
+<!-- ----------- TAB 3 — NETWORK & ENDPOINT ----------- -->
 <div class="panel" id="panel-network">
-  <div class="ph">
-    <div><div class="ptitle">Network &amp; Endpoint Monitoring</div><div class="psub"><span class="ldot"></span>FortiOS REST API · Monitor APIs · FortiClient/FortiEndpoint · UEBA</div></div>
-    <div class="ha"><button class="btn">Export Topology</button><button class="btn btnp">Quarantine Host</button></div>
-  </div>
-
-  <div class="g4">
-    <div class="kpi"><div class="kl">Active Sessions</div><div class="kv" id="sessVal">12,847</div><div class="kd"><span class="up">340</span> anomalous</div></div>
-    <div class="kpi"><div class="kl">FortiGate CPU</div><div class="kv" id="cpuVal">34%</div><div class="kd">4 cores · Normal</div></div>
-    <div class="kpi"><div class="kl">Throughput</div><div class="kv">8.2 Gbps</div><div class="kd"><span class="dn">Normal</span></div></div>
-    <div class="kpi ka"><div class="kl">Endpoints at Risk</div><div class="kv">7</div><div class="kd"><span class="up">FortiEDR · 1,204 total</span></div></div>
-  </div>
-
-  <div class="g11">
-    <div class="card">
-      <div class="ch"><div><div class="ct">Traffic by Protocol</div><div class="cs">FortiOS REST API · /api/v2/monitor/firewall/session</div></div></div>
-      <div class="cb" id="net-proto"></div>
+  <div id="network-root">
+    <div class="ph">
+      <div><div class="ptitle">Network &amp; Endpoint Monitoring</div><div class="psub"><span class="ldot"></span>Loading FortiGate and Wazuh telemetry...</div></div>
+      <div class="ha"><button class="btn" disabled>Export Topology</button><button class="btn btnp" disabled>Quarantine Host</button></div>
     </div>
-    <div class="card">
-      <div class="ch"><div><div class="ct">Network Topology — Live</div><div class="cs">FortiGate as central node · anomalous links highlighted</div></div></div>
-      <div class="twrap"><svg id="topo-svg" viewBox="0 0 440 170"></svg></div>
-    </div>
-  </div>
-
-  <div class="g11">
-    <div class="card">
-      <div class="ch"><div><div class="ct">FortiGate — Live Metrics</div><div class="cs">FortiOS REST API · 192.168.100.1 · FortiOS 7.4</div></div><span class="badge blive">Connected</span></div>
-      <div class="cb">
-        <div class="fgrid">
-          <div class="fstat"><div class="fsl">CPU</div><div class="fsv" id="cpuVal2">34%</div><div class="fss">4 cores · Normal</div></div>
-          <div class="fstat"><div class="fsl">Memory</div><div class="fsv">61%</div><div class="fss">4.9 GB / 8 GB</div></div>
-          <div class="fstat"><div class="fsl">Active Sessions</div><div class="fsv" id="sessVal2">12,847</div><div class="fss">IPv4 + IPv6</div></div>
-          <div class="fstat"><div class="fsl">IPS Events</div><div class="fsv" style="color:var(--red)">47</div><div class="fss">Last 1h · 3 critical</div></div>
-        </div>
-        <div style="font-size:10px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Top Blocked IPs · Configuration API</div>
-        <div class="iprow"><span class="ipaddr">185.220.101.4</span><span class="ipgeo">RU</span><div class="ipbw"><div class="ipbf" style="width:100%"></div></div><span class="ipcnt">2,841</span></div>
-        <div class="iprow"><span class="ipaddr">91.108.4.12</span><span class="ipgeo">CN</span><div class="ipbw"><div class="ipbf" style="width:78%"></div></div><span class="ipcnt">2,214</span></div>
-        <div class="iprow"><span class="ipaddr">45.33.32.156</span><span class="ipgeo">US</span><div class="ipbw"><div class="ipbf" style="width:52%"></div></div><span class="ipcnt">1,477</span></div>
-        <div class="iprow"><span class="ipaddr">103.21.244.0</span><span class="ipgeo">HK</span><div class="ipbw"><div class="ipbf" style="width:34%"></div></div><span class="ipcnt">964</span></div>
-        <div class="iprow"><span class="ipaddr">198.199.10.5</span><span class="ipgeo">NL</span><div class="ipbw"><div class="ipbf" style="width:18%"></div></div><span class="ipcnt">511</span></div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="ch"><div><div class="ct">User &amp; Entity Behavior Analytics</div><div class="cs">Risk Adjusted Alerts · FortiAnalyzer UEBA · anomaly scoring</div></div><span class="ca">View all entities</span></div>
-      <div id="ueba-list"></div>
-    </div>
+    <div class="aibox loading"><strong>Network telemetry:</strong> Waiting for live source status.</div>
   </div>
 </div>
 
-<!-- ═══════════ TAB 4 — INCIDENT RESPONSE ═══════════ -->
+<!-- ----------- TAB 4 — INCIDENT RESPONSE ----------- -->
 <div class="panel" id="panel-ir">
-  <div class="ph">
-    <div><div class="ptitle">Incident Response &amp; SOAR Automation</div><div class="psub"><span class="ldot"></span>Shuffle SOAR · FortiOS REST API · automated playbooks · digital forensics</div></div>
-    <div class="ha"><button class="btn">Forensic Report</button><button class="btn btnp">Isolate Host via API</button></div>
-  </div>
-
-  <div class="aibox"><strong>SOAR Automation — INC-2026-0183:</strong> Host WRK-042 auto-quarantined via FortiGate Policy API at 14:24:01 UTC. FortiEDR snapshot in progress. Analyst notification queued. Containment: complete.</div>
-
-  <div class="g11">
-    <div class="card">
-      <div class="ch"><div><div class="ct">Automated Playbook — INC-2026-0183</div><div class="cs">Lateral Movement response · Shuffle SOAR · FortiOS API</div></div><span class="badge bp1">P1 · Active</span></div>
-      <div class="cb" id="playbook"></div>
+  <div id="incident-root">
+    <div class="ph">
+      <div><div class="ptitle">Incident Response &amp; SOAR Automation</div><div class="psub"><span class="ldot"></span>Loading Wazuh candidates and Shuffle status...</div></div>
+      <div class="ha"><button class="btn" disabled>Forensic Report</button><button class="btn btnp" disabled>Isolate Host via API</button></div>
     </div>
-    <div class="card">
-      <div class="ch"><div><div class="ct">Incident Timeline — INC-2026-0183</div><div class="cs">Source: FortiAnalyzer correlation engine</div></div></div>
-      <div class="cb" id="ir-timeline"></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="ch"><div><div class="ct">FortiOS REST API — Automated Actions Log</div><div class="cs">Configuration APIs + Monitor APIs · executed by SOAR playbook</div></div><span class="badge blive">4 / 4 successful</span></div>
-    <div class="cb" id="api-actions"></div>
+    <div class="aibox loading"><strong>Incident Response:</strong> Waiting for live source status.</div>
   </div>
 </div>
 
-<!-- ═══════════ TAB 5 — COMPLIANCE & RISK ═══════════ -->
+<!-- ----------- TAB 5 — COMPLIANCE & RISK ----------- -->
 <div class="panel" id="panel-compliance">
-  <div class="ph">
-    <div><div class="ptitle">Compliance &amp; Risk Management</div><div class="psub"><span class="ldot"></span>FortiAnalyzer automated reports · configuration drift · vulnerability scoring</div></div>
-    <div class="ha"><button class="btn">Schedule Report</button><button class="btn btnp">Generate Compliance Report</button></div>
-  </div>
-
-  <div class="g4">
-    <div class="kpi"><div class="kl">ISO 27001</div><div class="kv" style="color:var(--green)">91%</div><div class="kd"><span class="dn">Compliant</span></div></div>
-    <div class="kpi"><div class="kl">PCI DSS 4.0</div><div class="kv" style="color:var(--amber)">76%</div><div class="kd"><span class="up">2 controls pending</span></div></div>
-    <div class="kpi"><div class="kl">LGPD / GDPR</div><div class="kv" style="color:var(--green)">88%</div><div class="kd"><span class="dn">Compliant</span></div></div>
-    <div class="kpi"><div class="kl">NIST CSF 2.0</div><div class="kv" style="color:var(--amber)">79%</div><div class="kd"><span class="up">1 gap open</span></div></div>
-  </div>
-
-  <div class="g11">
-    <div class="card">
-      <div class="ch"><div><div class="ct">Controls by Framework</div><div class="cs">FortiAnalyzer automated compliance reporting</div></div></div>
-      <div class="cb" id="comp-bars"></div>
+  <div id="compliance-root">
+    <div class="ph">
+      <div><div class="ptitle">Compliance &amp; Risk Management</div><div class="psub"><span class="ldot"></span>Loading Wazuh policy, audit and vulnerability telemetry...</div></div>
+      <div class="ha"><button class="btn" disabled>Schedule Report</button><button class="btn btnp" disabled>Generate Compliance Report</button></div>
     </div>
-    <div class="card">
-      <div class="ch"><div><div class="ct">Configuration Drift — Fortinet Fabric</div><div class="cs">FortiAnalyzer audit log · unauthorized changes</div></div><span class="ca">View audit log</span></div>
-      <table class="ftable">
-        <thead><tr><th>Device</th><th>Finding</th><th>Detected</th><th>Severity</th><th>Status</th></tr></thead>
-        <tbody id="drift-table"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="ch"><div><div class="ct">Digital Asset Risk Score — by Network Segment</div><div class="cs">Vulnerability monitoring · internal &amp; external scanning · cloud risk</div></div></div>
-    <div class="cb" id="risk-seg"></div>
+    <div class="aibox loading"><strong>Compliance telemetry:</strong> Waiting for Wazuh compliance modules.</div>
   </div>
 </div>
 
-<!-- ═══════════ TAB 6 — JIRA TICKETS ═══════════ -->
+<!-- ----------- TAB 6 — JIRA TICKETS ----------- -->
 <div class="panel" id="panel-jira">
-  <div class="ph">
-    <div><div class="ptitle">Tickets de Incidentes</div><div class="psub"><span class="ldot"></span>Jira REST API · AI Auto-fill · Bloqueio de IP · Escalonamento · Resposta a Atividades Suspeitas</div></div>
-    <div class="ha">
-      <button class="btn" onclick="syncJiraTickets()">Sync</button>
-      <button class="btn btnj" onclick="openNewTicket()">+ Novo Ticket</button>
+  <div id="tickets-root">
+    <div class="ph">
+      <div><div class="ptitle">Incident Tickets</div><div class="psub"><span class="ldot"></span>Loading SPARK case records...</div></div>
+      <div class="ha"><button class="btn" disabled>Sync</button><button class="btn btnj" disabled>New Ticket</button></div>
     </div>
-  </div>
-
-  <!-- JIRA CONFIG -->
-  <div class="card" style="margin-bottom:14px">
-    <div class="ch" style="cursor:pointer" onclick="toggleJiraConfig()">
-      <div style="display:flex;align-items:center;gap:10px">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--tm);flex-shrink:0"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-        <div>
-          <div class="ct">Configuração Jira</div>
-          <div class="cs">REST API · credenciais e projeto</div>
-        </div>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <span class="jira-config-status jcfg-off" id="jiraCfgStatus">Nao configurado</span>
-        <svg id="jiraCfgChevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--tm);transition:transform .2s"><polyline points="6 9 12 15 18 9"/></svg>
-      </div>
-    </div>
-    <div id="jiraConfigBody" style="display:none;padding:14px 16px;border-top:1px solid var(--border)">
-      <div class="jira-config-row">
-        <div class="jm-field">
-          <div class="jm-label">Jira Base URL</div>
-          <input class="jm-input" id="cfgJiraUrl" type="text" placeholder="https://seu-org.atlassian.net" style="min-width:240px">
-        </div>
-        <div class="jm-field">
-          <div class="jm-label">Email / Username</div>
-          <input class="jm-input" id="cfgJiraEmail" type="text" placeholder="analyst@empresa.com" style="min-width:180px">
-        </div>
-        <div class="jm-field">
-          <div class="jm-label">API Token</div>
-          <input class="jm-input" id="cfgJiraToken" type="password" placeholder="••••••••••••••••" style="min-width:180px">
-        </div>
-        <div class="jm-field">
-          <div class="jm-label">Project Key</div>
-          <input class="jm-input" id="cfgJiraProject" type="text" placeholder="SPARK" style="min-width:80px;max-width:100px">
-        </div>
-        <div style="display:flex;flex-direction:column;gap:4px">
-          <div class="jm-label" style="opacity:0">.</div>
-          <button class="btn btnp" onclick="saveJiraConfig()" style="white-space:nowrap">Salvar e Conectar</button>
-        </div>
-      </div>
-      <div style="font-size:11px;color:var(--tm);margin-top:4px">As credenciais sao salvas localmente no navegador. O token nao e enviado para nenhum servidor externo.</div>
-    </div>
-  </div>
-
-  <!-- STATS -->
-  <div class="jira-stats" id="jiraStats">
-    <div class="jstat"><div class="jstat-v" style="color:var(--red)" id="jstatTotal">0</div><div class="jstat-l">Total Abertos</div></div>
-    <div class="jstat"><div class="jstat-v" style="color:var(--red)" id="jstatP1">0</div><div class="jstat-l">P1 Críticos</div></div>
-    <div class="jstat"><div class="jstat-v" style="color:var(--amber)" id="jstatP2">0</div><div class="jstat-l">P2 Altos</div></div>
-    <div class="jstat"><div class="jstat-v" style="color:var(--green)" id="jstatDone">0</div><div class="jstat-l">Resolvidos</div></div>
-    <div class="jstat"><div class="jstat-v" style="color:var(--blue)" id="jstatAI">0</div><div class="jstat-l">Criados via IA</div></div>
-  </div>
-
-  <!-- AI BOX -->
-  <div class="aibox" id="jiraAiBox"><strong>AI SOC Analyst:</strong> Ready to analyze active alerts and suggest incident tickets. Click "+ New Ticket" to create an AI-assisted ticket from detected incidents.</div>
-
-  <!-- FILTERS -->
-  <div class="jira-topbar">
-    <div class="jira-filters">
-      <select class="jira-filter-sel" id="filterPriority" onchange="renderBoard()">
-        <option value="">Todas prioridades</option>
-        <option value="p1">P1 Critical</option>
-        <option value="p2">P2 High</option>
-        <option value="p3">P3 Medium</option>
-        <option value="p4">P4 Low</option>
-      </select>
-      <select class="jira-filter-sel" id="filterAssignee" onchange="renderBoard()">
-        <option value="">Todos analistas</option>
-        <option value="R. Lima">R. Lima</option>
-        <option value="D. Souza">D. Souza</option>
-        <option value="J. Silva">J. Silva</option>
-        <option value="M. Pereira">M. Pereira</option>
-      </select>
-      <select class="jira-filter-sel" id="filterType" onchange="renderBoard()">
-        <option value="">Todos tipos</option>
-        <option value="incident">Incident</option>
-        <option value="threat">Threat</option>
-        <option value="vuln">Vulnerability</option>
-        <option value="task">Task</option>
-      </select>
-    </div>
-    <div style="font-size:11px;color:var(--tm)" id="boardSyncTime">Última sincronização: —</div>
-  </div>
-
-  <!-- KANBAN BOARD -->
-  <div class="jira-board">
-    <div class="jira-col jcol-open">
-      <div class="jira-col-head">Open <span class="jira-col-count" id="cnt-open">0</span></div>
-      <div class="jira-col-body" id="col-open"></div>
-    </div>
-    <div class="jira-col jcol-prog">
-      <div class="jira-col-head">In Progress <span class="jira-col-count" id="cnt-inprogress">0</span></div>
-      <div class="jira-col-body" id="col-inprogress"></div>
-    </div>
-    <div class="jira-col jcol-review">
-      <div class="jira-col-head">In Review <span class="jira-col-count" id="cnt-review">0</span></div>
-      <div class="jira-col-body" id="col-review"></div>
-    </div>
-    <div class="jira-col jcol-done">
-      <div class="jira-col-head">Done <span class="jira-col-count" id="cnt-done">0</span></div>
-      <div class="jira-col-body" id="col-done"></div>
-    </div>
-  </div>
-
-  <!-- IP BLOCK LOG + ESCALATIONS -->
-  <div class="g11">
-    <div class="card">
-      <div class="ch">
-        <div><div class="ct">Log de Bloqueio de IPs</div><div class="cs">Acoes executadas via FortiGate API · historico da sessao</div></div>
-        <span class="badge blive" id="blockedCount">0 bloqueados</span>
-      </div>
-      <div style="padding:0">
-        <table class="ftable">
-          <thead><tr><th>IP</th><th>Pais</th><th>Acao</th><th>Motivo</th><th>Analista</th><th>Hora</th><th>Status</th></tr></thead>
-          <tbody id="ipBlockLog"></tbody>
-        </table>
-        <div id="ipBlockEmpty" style="padding:20px;text-align:center;font-size:12px;color:var(--tm)">No IP block actions recorded in this session.</div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="ch">
-        <div><div class="ct">Escalonamentos para Superior</div><div class="cs">Incidentes repassados para analise · historico da sessao</div></div>
-        <span class="badge bexp" id="escalationCount">0 escalonamentos</span>
-      </div>
-      <div style="padding:0">
-        <table class="ftable">
-          <thead><tr><th>Ticket</th><th>Incidente</th><th>Repassado para</th><th>Motivo</th><th>Hora</th><th>Status</th></tr></thead>
-          <tbody id="escalationLog"></tbody>
-        </table>
-        <div id="escalationEmpty" style="padding:20px;text-align:center;font-size:12px;color:var(--tm)">No escalations recorded in this session.</div>
-      </div>
-    </div>
+    <div class="aibox loading"><strong>Tickets:</strong> Waiting for local case store.</div>
   </div>
 </div>
-
 </main>
-<div class="jira-overlay" id="jiraOverlay">
-  <div class="jira-modal" id="jiraModal">
-    <div class="jm-header">
-      <div class="jm-title-block">
-        <div class="jm-id" id="jmId">INC-NEW</div>
-        <div class="jm-title" id="jmTitle">Novo Ticket de Incidente</div>
-      </div>
-      <button class="jm-close" onclick="closeJiraModal()">✕</button>
-    </div>
-    <div class="jm-body">
-      <div class="jm-main">
-
-        <!-- AI AUTOFILL -->
-        <div class="ai-fill-box">
-          <div class="ai-fill-header">
-            <div class="ai-fill-icon">AI</div>
-            <div><div class="ai-fill-title">Auto-preenchimento com IA</div><div class="ai-fill-sub">Selecione um alerta para preencher automaticamente</div></div>
-          </div>
-          <div class="ai-fill-actions" id="aiChips"></div>
-          <div class="ai-typing" id="aiTyping"></div>
-        </div>
-
-        <!-- T?TULO -->
-        <div class="jm-field">
-          <div class="jm-label">Título do Ticket</div>
-          <input class="jm-input" id="jmTitleInput" type="text" placeholder="Ex: [P1] Lateral Movement — VLAN 10 · INC-2026-0183">
-        </div>
-
-        <!-- DESCRI??O -->
-        <div class="jm-field">
-          <div class="jm-label">Descrição / Evidências</div>
-          <textarea class="jm-textarea" id="jmDesc" placeholder="Descreva o incidente, IOCs encontrados, ações tomadas..."></textarea>
-        </div>
-
-        <!-- AN?LISE IA -->
-        <div class="jm-field">
-          <div class="jm-label">Análise IA — Contexto &amp; Recomendação</div>
-          <div class="ai-stream-box" id="jmAiAnalysis">Selecione um alerta acima para gerar análise automática…</div>
-        </div>
-
-        <!-- STEPS TO REPRODUCE / PLAYBOOK -->
-        <div class="jm-field">
-          <div class="jm-label">Passos de Resposta (Playbook)</div>
-          <textarea class="jm-textarea" id="jmPlaybook" placeholder="1. Isolar host via FortiGate API&#10;2. Coletar evidências FortiEDR&#10;3. Notificar stakeholders…"></textarea>
-        </div>
-
-      </div>
-      <div class="jm-sidebar">
-
-        <!-- STATUS -->
-        <div class="jm-field">
-          <div class="jm-sidebar-label">Status</div>
-          <select class="jm-select" id="jmStatus">
-            <option value="open">Open</option>
-            <option value="inprogress">In Progress</option>
-            <option value="review">In Review</option>
-            <option value="done">Done</option>
-          </select>
-        </div>
-
-        <!-- PRIORIDADE -->
-        <div class="jm-field">
-          <div class="jm-sidebar-label">Prioridade</div>
-          <select class="jm-select" id="jmPriority">
-            <option value="p1">P1 — Critical</option>
-            <option value="p2">P2 — High</option>
-            <option value="p3">P3 — Medium</option>
-            <option value="p4">P4 — Low</option>
-          </select>
-        </div>
-
-        <!-- TIPO -->
-        <div class="jm-field">
-          <div class="jm-sidebar-label">Tipo</div>
-          <select class="jm-select" id="jmType">
-            <option value="incident">Incident</option>
-            <option value="threat">Threat</option>
-            <option value="vuln">Vulnerability</option>
-            <option value="task">Task</option>
-            <option value="change">Change Request</option>
-          </select>
-        </div>
-
-        <!-- ASSIGNEE -->
-        <div class="jm-field">
-          <div class="jm-sidebar-label">Analista Responsável</div>
-          <select class="jm-select" id="jmAssignee">
-            <option value="">Unassigned</option>
-            <option value="R. Lima">R. Lima</option>
-            <option value="D. Souza">D. Souza</option>
-            <option value="J. Silva">J. Silva</option>
-            <option value="M. Pereira">M. Pereira</option>
-          </select>
-        </div>
-
-        <!-- INCIDENT LINK -->
-        <div class="jm-field">
-          <div class="jm-sidebar-label">Incidente Vinculado</div>
-          <input class="jm-input" id="jmIncLink" type="text" placeholder="INC-2026-XXXX">
-        </div>
-
-        <!-- MITRE -->
-        <div class="jm-field">
-          <div class="jm-sidebar-label">MITRE ATT&CK</div>
-          <input class="jm-input" id="jmMitre" type="text" placeholder="T1550.002, T1041…">
-        </div>
-
-        <!-- SRC IP + PA?S -->
-        <div class="jm-field">
-          <div class="jm-sidebar-label">IP Origem</div>
-          <div style="display:flex;gap:5px">
-            <input class="jm-input" id="jmIp" type="text" placeholder="192.168.x.x / WRK-xxx" style="flex:1">
-            <button class="btn" onclick="lookupIpCountry()" title="Identificar pais" style="padding:5px 8px;flex-shrink:0;font-size:11px">Buscar</button>
-          </div>
-        </div>
-
-        <!-- PA?S DO IP -->
-        <div class="jm-field">
-          <div class="jm-sidebar-label">Pais de Origem</div>
-          <div id="jmCountryDisplay" style="display:flex;align-items:center;gap:7px;padding:7px 10px;background:#fafbfc;border:1px solid var(--border);border-radius:var(--r);min-height:32px">
-            <span id="jmCountryFlag" style="font-size:16px"></span>
-            <span id="jmCountryName" style="font-size:12px;color:var(--t2)">—</span>
-            <span id="jmCountryCode" class="jcard-country" style="display:none"></span>
-          </div>
-        </div>
-
-        <!-- ACAO IP: BLOQUEAR / DESBLOQUEAR -->
-        <div class="jm-field">
-          <div class="jm-sidebar-label">Acao sobre o IP</div>
-          <div style="display:flex;gap:5px">
-            <button class="btn" id="btnBlockIp" onclick="blockIp()" style="flex:1;padding:6px 0;font-size:11px;font-weight:600;color:#991b1b;border-color:#fca5a0;background:#fee2e2">Bloquear IP</button>
-            <button class="btn" id="btnUnblockIp" onclick="unblockIp()" style="flex:1;padding:6px 0;font-size:11px;font-weight:600;color:#065f46;border-color:#a7f3d0;background:#ecfdf5">Desbloquear</button>
-          </div>
-          <div id="jmIpStatus" style="font-size:10px;color:var(--tm);margin-top:3px;min-height:14px"></div>
-        </div>
-
-        <!-- ESCALONAR PARA SUPERIOR -->
-        <div class="jm-field">
-          <div class="jm-sidebar-label">Escalonar para Superior</div>
-          <select class="jm-select" id="jmEscalateTo" onchange="toggleEscalationReason()">
-            <option value="">Nao escalonar</option>
-            <option value="Gerente SOC">Gerente SOC</option>
-            <option value="CISO">CISO</option>
-            <option value="R. Lima (Senior)">R. Lima (Senior)</option>
-            <option value="D. Souza (Senior)">D. Souza (Senior)</option>
-            <option value="J. Silva (Senior)">J. Silva (Senior)</option>
-            <option value="M. Pereira (Senior)">M. Pereira (Senior)</option>
-            <option value="Equipe Forense">Equipe Forense</option>
-          </select>
-        </div>
-        <div class="jm-field" id="escalationReasonField" style="display:none">
-          <div class="jm-sidebar-label">Motivo do Escalonamento</div>
-          <textarea class="jm-textarea" id="jmEscalationReason" placeholder="Descreva o motivo do escalonamento..." style="min-height:60px"></textarea>
-        </div>
-
-        <!-- TICKET KEY -->
-        <div class="jm-field">
-          <div class="jm-sidebar-label">Ticket ID</div>
-          <input class="jm-input" id="jmKey" type="text" placeholder="SPARK-001" readonly style="background:#fafbfc;color:var(--tm)">
-        </div>
-
-        <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
-          <button class="btn btnj" id="jmSubmitBtn" onclick="submitJiraTicket()" style="width:100%;padding:8px">
-            <span id="jmSubmitLabel">Criar no SOC</span>
-          </button>
-          <button class="btn" onclick="closeJiraModal()" style="width:100%;padding:8px">Cancelar</button>
-        </div>
-
-      </div>
-    </div>
-  </div>
-</div>
-
 <footer class="footer">
   <div>SPARK SOC — NG-SOC as a Service &nbsp;·&nbsp; FIAP / Fortinet Challenge 2025 &nbsp;·&nbsp; Team: Diogo, José, Júlio, Matheus, Rafael</div>
   <div class="fsys">
@@ -867,13 +454,13 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
 </footer>
 
 <script src="/js/exec.js"></script>
-<script src="/js/threat.js"></script>
-<script src="/js/network.js"></script>
-<script src="/js/ir.js"></script>
-<script src="/js/compliance.js"></script>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="/react/executive/ExecutiveOverview.js"></script>
-<script src="/js/tickets.js"></script>
+<script src="/react/threat/ThreatDetection.js"></script>
+<script src="/react/network/NetworkEndpoint.js"></script>
+<script src="/react/incident/IncidentResponse.js"></script>
+<script src="/react/compliance/ComplianceRisk.js"></script>
+<script src="/react/tickets/TicketsBoard.js"></script>
 </body>
 </html>

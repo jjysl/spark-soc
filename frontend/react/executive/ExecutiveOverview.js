@@ -9,7 +9,7 @@
 
   function fmtNum(value) {
     if (value === undefined || value === null) return '...';
-    return Number(value).toLocaleString('pt-BR');
+    return Number(value).toLocaleString('en-US');
   }
 
   function KpiCard({label, value, detail, critical, tone}) {
@@ -431,7 +431,7 @@
       h('div', {className: 'ph'},
         h('div', null,
           h('div', {className: 'ptitle'}, 'Executive Overview'),
-          h('div', {className: 'psub'}, h('span', {className: 'ldot'}), loading ? `Updating ${range} telemetry...` : updatedAt ? `Live - updated ${updatedAt.toLocaleTimeString('pt-BR')}` : 'Syncing live sources...')
+          h('div', {className: 'psub'}, h('span', {className: 'ldot'}), loading ? `Updating ${range} telemetry...` : updatedAt ? `Live - updated ${updatedAt.toLocaleTimeString('en-US')}` : 'Syncing live sources...')
         ),
         h('div', {className: 'ha'}, h(TimeSelector, {value: range, onChange: setRange}), h('button', {className: 'btn'}, 'Export Report'), h('button', {className: 'btn btnp'}, 'Open Service Request'))
       ),
