@@ -77,7 +77,7 @@ def _build_workqueue(cases: list[dict]) -> tuple[list[dict], dict]:
     within_sla = 0
     measurable = 0
 
-    for idx, case in enumerate(cases[:25], start=1):
+    for idx, case in enumerate(cases, start=1):
         priority = case.get("priority") or "P3"
         policy_minutes = int(case.get("sla_minutes") or SLA_POLICY_MINUTES.get(priority, 90))
         created_at = _parse_wazuh_timestamp(case.get("created_at", ""))
@@ -614,7 +614,7 @@ def executive_overview():
 
     alerts = alert_data.get("alerts", [])
     promoted_cases = ticket_store.promote_alerts_to_cases(alerts, SLA_POLICY_MINUTES) if alerts else []
-    case_records = ticket_store.list_incident_cases(limit=25)
+    case_records = ticket_store.list_incident_cases(limit=100)
     lifecycle_metrics = ticket_store.get_incident_lifecycle_metrics()
     workqueue, sla_summary = _build_workqueue(case_records)
     posture = _build_posture(alert_data, agents, fortigate_data, shuffle_data, sla_summary)
