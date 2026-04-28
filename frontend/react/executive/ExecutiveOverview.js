@@ -113,7 +113,7 @@
     );
   }
 
-  function WorkqueueTable({items}) {
+  function WorkqueueTable({items, onCaseUpdate}) {
     const [openId, setOpenId] = useState(null);
     const [query, setQuery] = useState('');
     const [priority, setPriority] = useState('all');
@@ -159,11 +159,28 @@
     }
 
     function renderDetails(item) {
+      function updateCase(patch) {
+        if (!item.caseId) return;
+        fetch(`/spark/incident-cases/${encodeURIComponent(item.caseId)}`, {
+          method: 'PUT',
+          headers: {'Content-Type': 'application/json'},
+          credentials: 'include',
+          body: JSON.stringify(patch),
+        }).then(response => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.json();
+        }).then(() => onCaseUpdate && onCaseUpdate()).catch(console.error);
+      }
+      const actions = h('div', {style: {display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12}},
+        h('button', {className: 'detail-filter', onClick: () => updateCase({status: 'investigating'})}, 'Mark investigating'),
+        h('button', {className: 'detail-filter', onClick: () => updateCase({owner: 'SOC Analyst'})}, 'Assign to SOC Analyst'),
+        h('button', {className: 'detail-filter', onClick: () => updateCase({status: 'closed'})}, 'Close case')
+      );
       if (detailTab === 'json') {
-        return h('pre', {className: 'detail-log'}, JSON.stringify(item, null, 2));
+        return h(React.Fragment, null, actions, h('pre', {className: 'detail-log'}, JSON.stringify(item, null, 2)));
       }
       if (detailTab === 'rule') {
-        return h('div', {className: 'alert-detail'},
+        return h(React.Fragment, null, actions, h('div', {className: 'alert-detail'},
           h(DetailCell, {label: 'Rule ID', value: item.id, onFilter: addFieldFilter}),
           h(DetailCell, {label: 'Rule Level', value: item.level, onFilter: addFieldFilter}),
           h(DetailCell, {label: 'Groups', value: Array.isArray(item.groups) ? item.groups.join(', ') : item.groups, onFilter: addFieldFilter}),
@@ -173,9 +190,9 @@
           h(DetailCell, {label: 'SLA Policy', value: item.slaPolicy}),
           h(DetailCell, {label: 'Current State', value: item.status, onFilter: addFieldFilter}),
           item.fullLog ? h('pre', {className: 'detail-log'}, item.fullLog) : null
-        );
+        ));
       }
-      return h('div', {className: 'alert-detail'},
+      return h(React.Fragment, null, actions, h('div', {className: 'alert-detail'},
         h(DetailCell, {label: 'Rule / Level', value: `${item.id} / level ${item.level}`, onFilter: () => addFieldFilter('Rule', item.id)}),
         h(DetailCell, {label: 'Agent', value: `${item.agentName || '-'} (${item.agentIp || item.agentId || '-'})`, onFilter: () => addFieldFilter('Agent', item.agentName || item.agentIp || item.agentId)}),
         h(DetailCell, {label: 'Source -> Destination', value: `${item.srcIp || '-'}${item.srcPort ? ':' + item.srcPort : ''} -> ${item.dstIp || '-'}${item.dstPort ? ':' + item.dstPort : ''}`}),
@@ -184,8 +201,11 @@
         h(DetailCell, {label: 'Index', value: item.index, onFilter: addFieldFilter}),
         h(DetailCell, {label: 'Document ID', value: item.documentId, onFilter: addFieldFilter}),
         h(DetailCell, {label: 'SLA Policy', value: `${item.slaPolicy || '-'} (${item.slaState || 'unknown'})`}),
+        h(DetailCell, {label: 'Case Created', value: item.createdAt}),
+        h(DetailCell, {label: 'SLA Due', value: item.dueAt}),
+        h(DetailCell, {label: 'Source Alert Time', value: item.alertTimestamp}),
         item.fullLog ? h('pre', {className: 'detail-log'}, item.fullLog) : null
-      );
+      ));
     }
 
     return h('div', {className: 'card'},
@@ -390,10 +410,10 @@
     const [range, setRange] = useState('24h');
     const [loading, setLoading] = useState(false);
 
-    async function load(selectedRange = range) {
+    async function load(selectedRange = range, refresh = false) {
       setLoading(true);
       try {
-        const response = await fetch(`/spark/executive-overview?range=${encodeURIComponent(selectedRange)}`, {credentials: 'include'});
+        const response = await fetch(`/spark/executive-overview?range=${encodeURIComponent(selectedRange)}${refresh ? '&refresh=1' : ''}`, {credentials: 'include'});
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const payload = await response.json();
         setData(payload);
@@ -452,7 +472,7 @@
         h(SourceBadge, {label: 'Shuffle', ok: status.shuffle})
       ),
       h('div', {className: 'g21'}, h(PostureScore, {data}), h(AlertVolumeChart, {timeline, total: (kpis.events ?? kpis.events_24h) || 0, range: data?.range || range})),
-      h(WorkqueueTable, {items: workqueue})
+      h(WorkqueueTable, {items: workqueue, onCaseUpdate: () => load(range, true)})
     );
   }
 

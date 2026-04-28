@@ -60,66 +60,90 @@ def _badge_from_priority(priority: str) -> str:
     return {"P1": "bp1", "P2": "bp2", "P3": "bp3", "P4": "bp4"}.get(priority, "bp3")
 
 
-def _build_workqueue(alerts: list[dict]) -> tuple[list[dict], dict]:
+def _status_label(status: str, sla_state: str) -> str:
+    if status == "closed":
+        return "Closed"
+    if sla_state == "breached":
+        return "SLA Breached"
+    return {
+        "new": "New",
+        "investigating": "Investigating",
+        "acknowledged": "Acknowledged",
+        "resolved": "Resolved",
+    }.get(status or "new", "New")
+
+
+def _build_workqueue(cases: list[dict]) -> tuple[list[dict], dict]:
     now = datetime.now(timezone.utc)
     workqueue = []
     within_sla = 0
     measurable = 0
 
-    for idx, alert in enumerate(alerts[:25], start=1):
-        level = int(alert.get("level") or 0)
-        priority = _priority_from_level(level)
-        policy_minutes = SLA_POLICY_MINUTES[priority]
-        timestamp = _parse_wazuh_timestamp(alert.get("timestamp", ""))
+    for idx, case in enumerate(cases[:25], start=1):
+        priority = case.get("priority") or "P3"
+        policy_minutes = int(case.get("sla_minutes") or SLA_POLICY_MINUTES.get(priority, 90))
+        created_at = _parse_wazuh_timestamp(case.get("created_at", ""))
+        due_at = _parse_wazuh_timestamp(case.get("due_at", ""))
         age_minutes = 0
         remaining_minutes = policy_minutes
         sla_state = "unknown"
-        if timestamp:
+        if created_at and due_at:
             measurable += 1
-            age_minutes = max(0, int((now - timestamp).total_seconds() // 60))
-            remaining_minutes = policy_minutes - age_minutes
-            sla_state = "breached" if remaining_minutes < 0 else "at_risk" if remaining_minutes <= max(5, policy_minutes * 0.25) else "within"
-            if remaining_minutes >= 0:
+            age_minutes = max(0, int((now - created_at).total_seconds() // 60))
+            remaining_minutes = int((due_at - now).total_seconds() // 60)
+            if case.get("status") == "closed":
+                sla_state = "closed"
+            elif remaining_minutes < 0:
+                sla_state = "breached"
+            elif remaining_minutes <= max(5, policy_minutes * 0.25):
+                sla_state = "at_risk"
+            else:
+                sla_state = "within"
+            if remaining_minutes >= 0 or sla_state == "closed":
                 within_sla += 1
 
-        status = "SLA Breached" if sla_state == "breached" else "Investigating" if priority in {"P1", "P2"} else "New"
+        status = _status_label(case.get("status", "new"), sla_state)
         fill_pct = max(5, min(100, int((age_minutes / policy_minutes) * 100))) if policy_minutes else 0
         sla_class = "slbr" if sla_state == "breached" else "slwarn" if sla_state == "at_risk" else "slok"
         fill_class = "fbr" if sla_state == "breached" else "fwarn" if sla_state == "at_risk" else "fok"
 
         workqueue.append({
-            "id": f"WAZUH-{str(alert.get('rule_id') or idx).zfill(4)}",
-            "documentId": alert.get("document_id", ""),
-            "index": alert.get("index", ""),
-            "time": (alert.get("timestamp") or "")[11:16] or "--:--",
-            "timestamp": alert.get("timestamp", ""),
-            "description": alert.get("description") or "Wazuh alert",
-            "level": level,
-            "groups": alert.get("groups", []),
-            "agentId": alert.get("agent_id", ""),
-            "agentName": alert.get("agent_name", "unknown"),
-            "agentIp": alert.get("agent_ip", ""),
-            "managerName": alert.get("manager_name", ""),
-            "decoderName": alert.get("decoder_name", ""),
-            "location": alert.get("location", ""),
-            "srcIp": alert.get("src_ip", ""),
-            "dstIp": alert.get("dst_ip", ""),
-            "srcPort": alert.get("src_port", ""),
-            "dstPort": alert.get("dst_port", ""),
-            "tactic": alert.get("mitre_tactic") or "Detection",
-            "technique": alert.get("mitre_technique", ""),
+            "id": case.get("case_id") or f"SPARK-INC-{idx:04d}",
+            "caseId": case.get("case_id", ""),
+            "documentId": case.get("source_alert_id", ""),
+            "index": case.get("source_index", ""),
+            "time": (case.get("created_at") or "")[11:16] or "--:--",
+            "timestamp": case.get("created_at", ""),
+            "alertTimestamp": case.get("alert_timestamp", ""),
+            "description": case.get("title") or "Wazuh alert",
+            "level": "",
+            "groups": [],
+            "agentId": "",
+            "agentName": case.get("agent_name", "unknown"),
+            "agentIp": case.get("agent_ip", ""),
+            "managerName": "",
+            "decoderName": "",
+            "location": "",
+            "srcIp": case.get("src_ip", ""),
+            "dstIp": case.get("dst_ip", ""),
+            "srcPort": "",
+            "dstPort": "",
+            "tactic": case.get("mitre_tactic") or "Detection",
+            "technique": case.get("mitre_technique", ""),
             "priority": priority,
             "badge": _badge_from_priority(priority),
-            "analyst": "Unassigned",
+            "analyst": case.get("owner") or "Unassigned",
             "sla": _fmt_minutes(remaining_minutes),
             "slaPolicy": f"{policy_minutes} min",
+            "createdAt": case.get("created_at", ""),
+            "dueAt": case.get("due_at", ""),
             "slaState": sla_state,
             "slaClass": sla_class,
             "fillClass": fill_class,
             "slaPct": fill_pct,
             "status": status,
             "statusBadge": "bcrit" if sla_state == "breached" else "binv" if status == "Investigating" else "bnew",
-            "fullLog": alert.get("full_log", ""),
+            "fullLog": case.get("raw_summary", ""),
         })
 
     sla_compliance = round((within_sla / measurable) * 100, 1) if measurable else None
@@ -591,7 +615,9 @@ def executive_overview():
         shuffle_data = {"connected": False, "source": "shuffle", "error": "unavailable"}
 
     alerts = alert_data.get("alerts", [])
-    workqueue, sla_summary = _build_workqueue(alerts)
+    promoted_cases = ticket_store.promote_alerts_to_cases(alerts, SLA_POLICY_MINUTES) if alerts else []
+    case_records = ticket_store.list_incident_cases(limit=25)
+    workqueue, sla_summary = _build_workqueue(case_records)
     posture = _build_posture(alert_data, agents, fortigate_data, shuffle_data, sla_summary)
 
     top_alert = alerts[0] if alerts else {}
@@ -611,10 +637,10 @@ def executive_overview():
         "errors": errors,
         "kpis": {
             "critical_incidents": alert_data.get("p1", 0),
-            "mttd": "N/A",
-            "mttd_detail": "Incident lifecycle timestamps unavailable",
+            "mttd": "live",
+            "mttd_detail": f"{len(promoted_cases)} alert candidates promoted to case lifecycle",
             "mttr": "N/A",
-            "mttr_detail": "Resolved incident tickets unavailable",
+            "mttr_detail": "No closed case lifecycle records yet",
             "sla_compliance": sla_summary.get("compliance"),
             "sla_detail": f"{sla_summary.get('within', 0)}/{sla_summary.get('measurable', 0)} within escalation policy",
             "sla_target": 95,
@@ -638,6 +664,11 @@ def executive_overview():
         "shuffle": shuffle_data,
         "triage": triage,
         "workqueue": workqueue,
+        "case_lifecycle": {
+            "promoted": len(promoted_cases),
+            "open_cases": len(case_records),
+            "model": "alert -> candidate -> case/workqueue -> owner/status/SLA",
+        },
     }
     _executive_cache[cache_key] = (time.time(), payload)
     return jsonify(payload)
@@ -689,6 +720,22 @@ def delete_ticket(ticket_id):
 
 
 # ── IP Block / Unblock ─────────────────────────────────────────────────────
+
+@spark_bp.route("/spark/incident-cases", methods=["GET"])
+def list_incident_cases():
+    include_closed = request.args.get("include_closed") == "1"
+    limit = request.args.get("limit", 25, type=int)
+    return jsonify(ticket_store.list_incident_cases(limit=limit, include_closed=include_closed))
+
+
+@spark_bp.route("/spark/incident-cases/<case_id>", methods=["PUT"])
+def update_incident_case(case_id):
+    case = ticket_store.update_incident_case(case_id, request.get_json() or {})
+    if not case:
+        return jsonify({"error": "Incident case not found"}), 404
+    _executive_cache.clear()
+    return jsonify(case)
+
 
 @spark_bp.route("/spark/block-ip", methods=["POST"])
 def block_ip():
