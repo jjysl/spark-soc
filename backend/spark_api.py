@@ -3,6 +3,8 @@ SPARK SOC — API Blueprint /spark/*
 =====================================
 Todos os endpoints do dashboard agrupados num Blueprint Flask.
 """
+from concurrent.futures import ThreadPoolExecutor
+
 from flask import Blueprint, jsonify, request
 
 import config
@@ -72,25 +74,49 @@ def spark_wazuh_debug():
 def executive_overview():
     errors: dict[str, str] = {}
 
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            "wazuh_indexer": executor.submit(
+                wazuh.get_executive_alerts,
+                config.INDEXER_BASE,
+                config.INDEXER_USER,
+                config.INDEXER_PASS,
+            ),
+            "wazuh_api": executor.submit(
+                wazuh.get_agents_summary,
+                config.WAZUH_BASE,
+                config.WAZUH_USER,
+                config.WAZUH_PASS,
+            ),
+            "fortigate": executor.submit(
+                fortigate.get_resource_usage,
+                config.FORTIGATE_BASE_URL,
+                config.FORTIGATE_API_KEY,
+            ),
+            "shuffle": executor.submit(
+                shuffle.get_status,
+                config.SHUFFLE_BASE_URL,
+                config.SHUFFLE_API_KEY,
+            ),
+        }
+
     try:
-        alert_data = wazuh.get_executive_alerts(
-            config.INDEXER_BASE, config.INDEXER_USER, config.INDEXER_PASS
-        )
+        alert_data = futures["wazuh_indexer"].result()
     except Exception as exc:
         errors["wazuh_indexer"] = str(exc)
         alert_data = {"total": 0, "p1": 0, "p2": 0, "p3": 0, "alerts": [], "timeline": []}
 
     try:
-        agents = wazuh.get_agents_summary(config.WAZUH_BASE, config.WAZUH_USER, config.WAZUH_PASS)
+        agents = futures["wazuh_api"].result()
     except Exception as exc:
         errors["wazuh_api"] = str(exc)
         agents = {"total": 0, "active": 0, "disconnected": 0, "pending": 0, "agents": []}
 
-    fortigate_data = fortigate.get_resource_usage(config.FORTIGATE_BASE_URL, config.FORTIGATE_API_KEY)
+    fortigate_data = futures["fortigate"].result()
     if fortigate_data.get("source") != "fortigate-live":
         errors["fortigate"] = fortigate_data.get("error", "offline")
 
-    shuffle_data = shuffle.get_status(config.SHUFFLE_BASE_URL, config.SHUFFLE_API_KEY)
+    shuffle_data = futures["shuffle"].result()
     if not shuffle_data.get("connected"):
         errors["shuffle"] = shuffle_data.get("error", "offline")
 

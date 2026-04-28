@@ -8,19 +8,35 @@ def get_status(base_url: str, api_key: str) -> dict:
     if not base_url:
         return {"connected": False, "source": "not_configured"}
 
+    base = base_url.rstrip("/")
+
+    try:
+        resp = requests.get(f"{base}/api/v1/health", timeout=3)
+        content_type = resp.headers.get("content-type", "")
+        payload = resp.json() if "json" in content_type else {}
+        if resp.ok and payload.get("success") is not False:
+            return {
+                "connected": True,
+                "source": "/api/v1/health",
+                "status_code": resp.status_code,
+                "items": 0,
+            }
+    except Exception:
+        pass
+
     headers_to_try = [
         {"Authorization": f"Bearer {api_key}"} if api_key else {},
         {"Authorization": api_key} if api_key else {},
         {"X-API-Key": api_key} if api_key else {},
         {},
     ]
-    paths = ["/api/v1/workflows", "/api/v1/apps", "/api/v1/health", "/api/v1/users"]
+    paths = ["/api/v1/workflows", "/api/v1/apps", "/api/v1/users"]
 
     last_error = ""
     for path in paths:
         for headers in headers_to_try:
             try:
-                resp = requests.get(f"{base_url.rstrip('/')}{path}", headers=headers, timeout=8)
+                resp = requests.get(f"{base}{path}", headers=headers, timeout=3)
                 content_type = resp.headers.get("content-type", "")
                 payload = resp.json() if "json" in content_type else {}
                 if resp.ok and payload.get("success") is not False:

@@ -38,7 +38,7 @@
     );
   }
 
-  function LoadingOverview() {
+  function LoadingOverview({error}) {
     return h(React.Fragment, null,
       h('div', {className: 'ph'},
         h('div', null,
@@ -58,7 +58,7 @@
       ),
       h('div', {className: 'aibox loading'},
         h('strong', null, 'SPARK Live Triage: '),
-        'coletando telemetria das fontes live. A tela sera preenchida quando o primeiro snapshot chegar.'
+        error ? `falha ao buscar /spark/executive-overview (${error}).` : 'coletando telemetria das fontes live. A tela sera preenchida quando o primeiro snapshot chegar.'
       ),
       h('div', {className: 'source-strip'},
         h(SourceBadge, {label: 'Wazuh', loading: true}),
@@ -278,7 +278,7 @@
     }), [data]);
 
     if (!data) {
-      return h(LoadingOverview);
+      return h(LoadingOverview, {error});
     }
 
     return h(React.Fragment, null,
