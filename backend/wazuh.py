@@ -343,6 +343,118 @@ def _normalize_threat_hit(hit: dict) -> dict:
     }
 
 
+KILL_CHAIN_STAGES = [
+    {
+        "name": "Reconnaissance",
+        "terms": ["reconnaissance", "scan", "portscan", "probe", "service detection"],
+        "technique": "T1595",
+        "fallback": "No reconnaissance signal in current filter",
+    },
+    {
+        "name": "Initial Access",
+        "terms": ["initial access", "authentication failed", "invalid user", "sshd", "login", "phishing"],
+        "technique": "T1566",
+        "fallback": "No initial access signal in current filter",
+    },
+    {
+        "name": "Execution",
+        "terms": ["execution", "command", "powershell", "shell", "process", "script"],
+        "technique": "T1059",
+        "fallback": "No execution signal in current filter",
+    },
+    {
+        "name": "Lateral Movement",
+        "terms": ["lateral movement", "pass-the-hash", "remote", "rdp", "smb", "ssh"],
+        "technique": "T1550",
+        "fallback": "No lateral movement signal in current filter",
+    },
+    {
+        "name": "Exfiltration",
+        "terms": ["exfiltration", "upload", "data transfer", "tunnel", "dns tunneling"],
+        "technique": "T1041",
+        "fallback": "No exfiltration signal in current filter",
+    },
+]
+
+
+def _alert_text(alert: dict) -> str:
+    fields = [
+        alert.get("description", ""),
+        alert.get("mitre_tactic", ""),
+        alert.get("mitre_technique", ""),
+        " ".join(alert.get("groups") or []),
+        alert.get("decoder_name", ""),
+        alert.get("full_log", ""),
+    ]
+    return " ".join(str(item) for item in fields if item).lower()
+
+
+def _best_stage_alert(alerts: list[dict], stage: dict) -> dict | None:
+    for alert in alerts:
+        tactic = str(alert.get("mitre_tactic") or "").lower()
+        technique = str(alert.get("mitre_technique") or "")
+        text = _alert_text(alert)
+        if tactic == stage["name"].lower() or technique == stage["technique"]:
+            return alert
+        if any(term in text for term in stage["terms"]):
+            return alert
+    return None
+
+
+def _build_kill_chain(alerts: list[dict], total_value: int, time_range: str, counts: dict) -> dict:
+    active_alert = alerts[0] if alerts else None
+    incident_id = f"INC-2026-{str(abs(hash((active_alert or {}).get('document_id', time_range))) % 10000).zfill(4)}"
+    highest_priority = "P1" if counts.get("p1") else "P2" if counts.get("p2") else "P3" if counts.get("p3") else "P4"
+    confidence = 0
+    stages = []
+
+    for index, stage in enumerate(KILL_CHAIN_STAGES):
+        alert = _best_stage_alert(alerts, stage)
+        if alert:
+            confidence += 1
+            technique = alert.get("mitre_technique") or stage["technique"]
+            subject = alert.get("src_ip") or alert.get("agent_name") or alert.get("location") or "observed asset"
+            detail = f"{alert.get('description') or 'Wazuh detection'} - {subject} - {technique}"
+            state = "active" if active_alert and alert.get("document_id") == active_alert.get("document_id") else "done"
+        else:
+            detail = stage["fallback"]
+            state = "pending" if index >= confidence else "done"
+        stages.append({
+            "name": stage["name"],
+            "detail": detail,
+            "state": state,
+            "technique": stage["technique"],
+            "document_id": alert.get("document_id", "") if alert else "",
+            "rule_id": alert.get("rule_id", "") if alert else "",
+            "src_ip": alert.get("src_ip", "") if alert else "",
+            "agent_name": alert.get("agent_name", "") if alert else "",
+        })
+
+    if active_alert and not any(stage["state"] == "active" for stage in stages):
+        tactic = active_alert.get("mitre_tactic") or "Detection"
+        technique = active_alert.get("mitre_technique") or ""
+        subject = active_alert.get("src_ip") or active_alert.get("agent_name") or active_alert.get("location") or "observed asset"
+        stages[0] = {
+            "name": tactic,
+            "detail": f"{active_alert.get('description') or 'Wazuh detection'} - {subject} - {technique or 'no MITRE technique'}",
+            "state": "active",
+            "technique": technique,
+            "document_id": active_alert.get("document_id", ""),
+            "rule_id": active_alert.get("rule_id", ""),
+            "src_ip": active_alert.get("src_ip", ""),
+            "agent_name": active_alert.get("agent_name", ""),
+        }
+
+    return {
+        "incident_id": incident_id,
+        "title": f"Kill Chain - {incident_id}",
+        "subtitle": f"Active incident - Wazuh/FortiAnalyzer-style correlation - {total_value} detections in {time_range}",
+        "priority": highest_priority,
+        "confidence": round((confidence / len(KILL_CHAIN_STAGES)) * 100),
+        "stages": stages,
+    }
+
+
 def get_threat_detection_alerts(
     indexer_base: str,
     user: str,
@@ -448,11 +560,13 @@ def get_threat_detection_alerts(
 
     total = raw.get("hits", {}).get("total", {})
     total_value = total.get("value", len(alerts)) if isinstance(total, dict) else total
+    counts = {"p1": p1, "p2": p2, "p3": p3, "p4": p4}
     top_alert = alerts[0] if alerts else None
+    kill_chain = _build_kill_chain(alerts, total_value, time_range, counts)
     if top_alert:
         triage = (
             f"Wazuh Indexer returned {total_value} alerts in {time_range}. "
-            f"P1: {p1} | P2: {p2}. Latest: {top_alert.get('description')}."
+            f"P1: {p1} | P2: {p2}. Active chain: {kill_chain['incident_id']}."
         )
     else:
         triage = f"Wazuh Indexer returned no alerts in {time_range} for the current filters."
@@ -463,7 +577,7 @@ def get_threat_detection_alerts(
         "returned": len(alerts),
         "filters": [{"field": field, "value": value} for field, value in filters],
         "search": search,
-        "counts": {"p1": p1, "p2": p2, "p3": p3, "p4": p4},
+        "counts": counts,
         "levels": levels,
         "facets": {
             "tactics": aggs.get("tactics", {}).get("buckets", []),
@@ -472,6 +586,7 @@ def get_threat_detection_alerts(
         },
         "timeline": timeline,
         "alerts": alerts,
+        "kill_chain": kill_chain,
         "triage": triage,
     }
 

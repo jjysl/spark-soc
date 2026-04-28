@@ -14,6 +14,10 @@
     return Number(value || 0).toLocaleString('en-US');
   }
 
+  function clsPriority(priority) {
+    return {P1: 'bp1', P2: 'bp2', P3: 'bp3', P4: 'bp4'}[priority] || 'bp3';
+  }
+
   function fmtTime(value) {
     return value && value.length >= 19 ? value.substring(11, 19) : '--:--:--';
   }
@@ -44,23 +48,25 @@
     }, label || value);
   }
 
-  function ActiveAlertSummary({alert, onFilter}) {
-    if (!alert) {
+  function ActiveAlertSummary({chain, alert, onFilter}) {
+    if (!chain && !alert) {
       return h('div', {style: {fontSize: 12, color: 'var(--tm)'}}, 'No active alert in the selected range.');
     }
-    const rows = [
-      ['Rule', `${alert.rule_id || '--'} - ${alert.description || 'Wazuh alert'}`, 'rule.id', alert.rule_id],
-      ['Agent', `${alert.agent_name || 'unknown'} - ${alert.agent_ip || 'no IP'}`, 'agent.name', alert.agent_name],
-      ['MITRE', `${alert.mitre_tactic || 'Detection'} ${alert.mitre_technique || ''}`, 'mitre.tactic', alert.mitre_tactic],
-      ['Source', alert.src_ip || alert.location || '--', alert.src_ip ? 'src_ip' : 'location', alert.src_ip || alert.location],
-    ];
+    const stages = chain?.stages || [];
     return h(React.Fragment, null,
-      rows.map((row, idx) => h('div', {className: 'kcstep', key: row[0]},
-        h('div', {className: `kcicon ${idx === 0 ? 'act' : 'done'}`}, String(idx + 1)),
+      h('div', {style: {display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 12}},
         h('div', null,
-          h('div', {className: 'kct'}, row[0]),
-          h('div', {className: 'kcs'}, row[1]),
-          h(FilterButton, {field: row[2], value: row[3], label: 'filter', onFilter})
+          h('div', {style: {fontSize: 15, fontWeight: 700, color: 'var(--t1)'}}, chain?.title || 'Kill Chain - Active Detection'),
+          h('div', {style: {fontSize: 11, color: 'var(--tm)', marginTop: 3}}, chain?.subtitle || 'Latest normalized Wazuh detection')
+        ),
+        h('span', {className: `badge ${clsPriority(chain?.priority || alert?.priority)}`}, chain?.priority || alert?.priority || 'P3')
+      ),
+      stages.map((stage, idx) => h('div', {className: 'kcstep', key: stage.name},
+        h('div', {className: `kcicon ${stage.state === 'active' ? 'act' : stage.state === 'done' ? 'done' : ''}`}, stage.state === 'pending' ? '...' : '✓'),
+        h('div', null,
+          h('div', {className: 'kct'}, stage.name),
+          h('div', {className: 'kcs'}, stage.detail),
+          stage.document_id ? h(FilterButton, {field: stage.src_ip ? 'src_ip' : 'agent.name', value: stage.src_ip || stage.agent_name, label: 'filter', onFilter}) : null
         )
       ))
     );
@@ -186,7 +192,7 @@
         )) : h('span', {style: {fontSize: 11, color: 'var(--tm)'}}, 'No active field filters')
       ),
       h('table', {className: 'ftable'},
-        h('thead', null, h('tr', null, ['Time', 'Description', 'Agent', 'Source IP', 'MITRE', 'Severity', 'Status'].map(col => h('th', {key: col}, col)))),
+        h('thead', null, h('tr', null, ['Time', 'Source IP', 'Agent', 'Rule', 'MITRE', 'Priority', 'Status'].map(col => h('th', {key: col}, col)))),
         h('tbody', null,
           alerts.length ? alerts.flatMap(alert => {
             const id = String(alert.document_id || `${alert.rule_id}-${alert.timestamp}`);
@@ -194,11 +200,14 @@
             return [
               h('tr', {key: id, onClick: () => setOpenId(isOpen ? '' : id)},
                 h('td', null, h('span', {className: 'mono'}, fmtTime(alert.timestamp))),
-                h('td', null, h('span', {className: 'edesc', title: alert.description}, alert.description || 'Wazuh alert')),
-                h('td', null, h(FilterButton, {field: 'agent.name', value: alert.agent_name, label: alert.agent_name || 'unknown', onFilter: addFilter})),
                 h('td', null, h(FilterButton, {field: 'src_ip', value: alert.src_ip, label: alert.src_ip || alert.agent_ip || '--', onFilter: addFilter})),
+                h('td', null, h(FilterButton, {field: 'agent.name', value: alert.agent_name, label: alert.agent_name || 'unknown', onFilter: addFilter})),
+                h('td', null,
+                  h('div', {className: 'edesc', title: alert.description}, alert.description || 'Wazuh alert'),
+                  h('div', {style: {fontSize: 10, color: 'var(--tm)', marginTop: 2}}, `Rule ${alert.rule_id || '-'} - level ${alert.level || 0}`)
+                ),
                 h('td', null, h(FilterButton, {field: 'mitre.tactic', value: alert.mitre_tactic, label: shortTactic(alert.mitre_tactic), onFilter: addFilter})),
-                h('td', null, h('span', {className: `badge ${alert.severity_class || 'binfo'}`}, alert.severity || 'Info')),
+                h('td', null, h('span', {className: `badge ${clsPriority(alert.priority)}`}, alert.priority || 'P4')),
                 h('td', null, h('span', {className: `badge ${alert.status_class || 'bnew'}`}, alert.status || 'New'))
               ),
               isOpen ? h(AlertDetail, {key: `${id}-detail`, alert, tab: detailTab, setTab: setDetailTab, onFilter: addFilter}) : null,
@@ -335,10 +344,10 @@
       h('div', {className: 'g12'},
         h('div', {className: 'card'},
           h('div', {className: 'ch'},
-            h('div', null, h('div', {className: 'ct'}, 'Active Alert Summary'), h('div', {className: 'cs'}, 'Latest normalized Wazuh detection')),
+            h('div', null, h('div', {className: 'ct'}, 'Active Alert Summary'), h('div', {className: 'cs'}, 'Kill Chain - active incident correlation')),
             h('span', {className: `badge ${live ? 'blive' : 'binfo'}`}, live ? 'Live' : 'Loading')
           ),
-          h('div', {className: 'cb'}, h(ActiveAlertSummary, {alert: payload.alerts?.[0], onFilter: addFilter}))
+          h('div', {className: 'cb'}, h(ActiveAlertSummary, {chain: payload.kill_chain, alert: payload.alerts?.[0], onFilter: addFilter}))
         ),
         h('div', {className: 'card'},
           h('div', {className: 'ch'},
