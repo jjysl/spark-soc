@@ -108,13 +108,83 @@
 
   function WorkqueueTable({items}) {
     const [openId, setOpenId] = useState(null);
+    const [query, setQuery] = useState('');
+    const [priority, setPriority] = useState('all');
+    const [detailTab, setDetailTab] = useState('table');
+    const normalizedQuery = query.trim().toLowerCase();
+    const filteredItems = items.filter(item => {
+      const matchesPriority = priority === 'all' || item.priority === priority;
+      const haystack = [
+        item.id,
+        item.description,
+        item.agentName,
+        item.agentIp,
+        item.srcIp,
+        item.dstIp,
+        item.tactic,
+        item.technique,
+        item.status,
+        item.documentId,
+        item.index,
+      ].join(' ').toLowerCase();
+      return matchesPriority && (!normalizedQuery || haystack.includes(normalizedQuery));
+    });
+    const priorities = ['all', 'P1', 'P2', 'P3', 'P4'];
+
+    function renderDetails(item) {
+      if (detailTab === 'json') {
+        return h('pre', {className: 'detail-log'}, JSON.stringify(item, null, 2));
+      }
+      if (detailTab === 'rule') {
+        return h('div', {className: 'alert-detail'},
+          h(DetailCell, {label: 'Rule ID', value: item.id}),
+          h(DetailCell, {label: 'Rule Level', value: item.level}),
+          h(DetailCell, {label: 'Groups', value: Array.isArray(item.groups) ? item.groups.join(', ') : item.groups}),
+          h(DetailCell, {label: 'Decoder', value: item.decoderName}),
+          h(DetailCell, {label: 'Description', value: item.description}),
+          h(DetailCell, {label: 'SOCaaS Priority', value: item.priority}),
+          h(DetailCell, {label: 'SLA Policy', value: item.slaPolicy}),
+          h(DetailCell, {label: 'Current State', value: item.status}),
+          item.fullLog ? h('pre', {className: 'detail-log'}, item.fullLog) : null
+        );
+      }
+      return h('div', {className: 'alert-detail'},
+        h(DetailCell, {label: 'Rule / Level', value: `${item.id} / level ${item.level}`}),
+        h(DetailCell, {label: 'Agent', value: `${item.agentName || '-'} (${item.agentIp || item.agentId || '-'})`}),
+        h(DetailCell, {label: 'Source -> Destination', value: `${item.srcIp || '-'}${item.srcPort ? ':' + item.srcPort : ''} -> ${item.dstIp || '-'}${item.dstPort ? ':' + item.dstPort : ''}`}),
+        h(DetailCell, {label: 'MITRE', value: `${item.tactic || '-'} ${item.technique || ''}`.trim()}),
+        h(DetailCell, {label: 'Decoder / Location', value: `${item.decoderName || '-'} / ${item.location || '-'}`}),
+        h(DetailCell, {label: 'Index', value: item.index}),
+        h(DetailCell, {label: 'Document ID', value: item.documentId}),
+        h(DetailCell, {label: 'SLA Policy', value: `${item.slaPolicy || '-'} (${item.slaState || 'unknown'})`}),
+        item.fullLog ? h('pre', {className: 'detail-log'}, item.fullLog) : null
+      );
+    }
+
     return h('div', {className: 'card'},
       h('div', {className: 'ch'},
         h('div', null,
           h('div', {className: 'ct'}, 'Open Incidents - Service Workqueue'),
-          h('div', {className: 'cs'}, 'Fila executiva baseada em alertas Wazuh; clique para ver evidencias tecnicas')
+          h('div', {className: 'cs'}, 'SLA thresholds: P1 15 min · P2 45 min · P3 90 min · P4 6h · per Fortinet SOCaaS escalation policy')
         ),
-        h('span', {className: 'ca'}, `${items.length} itens`)
+        h('span', {className: 'ca'}, `${filteredItems.length}/${items.length} itens`)
+      ),
+      h('div', {className: 'wq-tools'},
+        h('input', {
+          className: 'wq-search',
+          value: query,
+          onChange: event => setQuery(event.target.value),
+          placeholder: 'Filtrar por regra, agente, IP, MITRE, status ou documento...',
+        }),
+        h('div', {className: 'wq-filter'},
+          priorities.map(value =>
+            h('button', {
+              key: value,
+              className: priority === value ? 'active' : '',
+              onClick: () => setPriority(value),
+            }, value === 'all' ? 'All' : value)
+          )
+        )
       ),
       h('table', {className: 'ftable'},
         h('thead', null,
@@ -124,7 +194,7 @@
           )
         ),
         h('tbody', null,
-          items.length ? items.flatMap(item => {
+          filteredItems.length ? filteredItems.flatMap(item => {
             const rowKey = `${item.id}-${item.documentId || item.time}`;
             const isOpen = openId === rowKey;
             return [
@@ -147,16 +217,20 @@
               ),
               isOpen && h('tr', {key: `${rowKey}-detail`, className: 'detail-row'},
                 h('td', {colSpan: 8},
-                  h('div', {className: 'alert-detail'},
-                    h(DetailCell, {label: 'Rule / Level', value: `${item.id} / level ${item.level}`}),
-                    h(DetailCell, {label: 'Agent', value: `${item.agentName || '-'} (${item.agentIp || item.agentId || '-'})`}),
-                    h(DetailCell, {label: 'Source -> Destination', value: `${item.srcIp || '-'}${item.srcPort ? ':' + item.srcPort : ''} -> ${item.dstIp || '-'}${item.dstPort ? ':' + item.dstPort : ''}`}),
-                    h(DetailCell, {label: 'MITRE', value: `${item.tactic || '-'} ${item.technique || ''}`.trim()}),
-                    h(DetailCell, {label: 'Decoder / Location', value: `${item.decoderName || '-'} / ${item.location || '-'}`}),
-                    h(DetailCell, {label: 'Index', value: item.index}),
-                    h(DetailCell, {label: 'Document ID', value: item.documentId}),
-                    h(DetailCell, {label: 'SLA Policy', value: `${item.slaPolicy || '-'} (${item.slaState || 'unknown'})`}),
-                    item.fullLog ? h('pre', {className: 'detail-log'}, item.fullLog) : null
+                  h('div', null,
+                    h('div', {className: 'detail-tabs'},
+                      ['table', 'json', 'rule'].map(tab =>
+                        h('button', {
+                          key: tab,
+                          className: detailTab === tab ? 'active' : '',
+                          onClick: event => {
+                            event.stopPropagation();
+                            setDetailTab(tab);
+                          },
+                        }, tab.toUpperCase())
+                      )
+                    ),
+                    renderDetails(item)
                   )
                 )
               )

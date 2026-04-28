@@ -3,8 +3,9 @@ SPARK SOC — API Blueprint /spark/*
 =====================================
 Todos os endpoints do dashboard agrupados num Blueprint Flask.
 """
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime, timezone
+import time
 
 from flask import Blueprint, jsonify, request
 
@@ -15,7 +16,9 @@ from backend import fortigate, wazuh, ai_proxy, shuffle
 spark_bp = Blueprint("spark", __name__)
 
 EXECUTIVE_RANGES = {"1h", "6h", "24h", "7d", "30d"}
-SLA_POLICY_MINUTES = {"P1": 15, "P2": 45, "P3": 90}
+SLA_POLICY_MINUTES = {"P1": 15, "P2": 45, "P3": 90, "P4": 360}
+EXECUTIVE_CACHE_TTL_SECONDS = 20
+_executive_cache: dict[str, tuple[float, dict]] = {}
 
 
 def _parse_wazuh_timestamp(value: str) -> datetime | None:
@@ -211,9 +214,18 @@ def executive_overview():
     time_range = request.args.get("range", "24h")
     if time_range not in EXECUTIVE_RANGES:
         time_range = "24h"
+    refresh = request.args.get("refresh") == "1"
+    cache_key = time_range
+    cached = _executive_cache.get(cache_key)
+    if cached and not refresh and (time.time() - cached[0]) < EXECUTIVE_CACHE_TTL_SECONDS:
+        payload = dict(cached[1])
+        payload["cached"] = True
+        return jsonify(payload)
+
     errors: dict[str, str] = {}
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    executor = ThreadPoolExecutor(max_workers=4)
+    try:
         futures = {
             "wazuh_indexer": executor.submit(
                 wazuh.get_executive_alerts,
@@ -240,25 +252,48 @@ def executive_overview():
             ),
         }
 
-    try:
-        alert_data = futures["wazuh_indexer"].result()
-    except Exception as exc:
-        errors["wazuh_indexer"] = str(exc)
+        try:
+            alert_data = futures["wazuh_indexer"].result(timeout=8)
+        except TimeoutError:
+            errors["wazuh_indexer"] = "timeout"
+            alert_data = {"total": 0, "p1": 0, "p2": 0, "p3": 0, "alerts": [], "timeline": []}
+        except Exception as exc:
+            errors["wazuh_indexer"] = str(exc)
+            alert_data = {"total": 0, "p1": 0, "p2": 0, "p3": 0, "alerts": [], "timeline": []}
+
+        try:
+            agents = futures["wazuh_api"].result(timeout=6)
+        except TimeoutError:
+            errors["wazuh_api"] = "timeout"
+            agents = {"total": 0, "active": 0, "disconnected": 0, "pending": 0, "agents": []}
+        except Exception as exc:
+            errors["wazuh_api"] = str(exc)
+            agents = {"total": 0, "active": 0, "disconnected": 0, "pending": 0, "agents": []}
+
+        try:
+            fortigate_data = futures["fortigate"].result(timeout=4)
+        except TimeoutError:
+            fortigate_data = {"source": "offline", "cpu": 0, "mem": 0, "sessions": 0, "error": "timeout"}
+        if fortigate_data.get("source") != "fortigate-live":
+            errors["fortigate"] = fortigate_data.get("error", "offline")
+
+        try:
+            shuffle_data = futures["shuffle"].result(timeout=4)
+        except TimeoutError:
+            shuffle_data = {"connected": False, "source": "shuffle", "error": "timeout"}
+        if not shuffle_data.get("connected"):
+            errors["shuffle"] = shuffle_data.get("error", "offline")
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    if "alert_data" not in locals():
         alert_data = {"total": 0, "p1": 0, "p2": 0, "p3": 0, "alerts": [], "timeline": []}
-
-    try:
-        agents = futures["wazuh_api"].result()
-    except Exception as exc:
-        errors["wazuh_api"] = str(exc)
+    if "agents" not in locals():
         agents = {"total": 0, "active": 0, "disconnected": 0, "pending": 0, "agents": []}
-
-    fortigate_data = futures["fortigate"].result()
-    if fortigate_data.get("source") != "fortigate-live":
-        errors["fortigate"] = fortigate_data.get("error", "offline")
-
-    shuffle_data = futures["shuffle"].result()
-    if not shuffle_data.get("connected"):
-        errors["shuffle"] = shuffle_data.get("error", "offline")
+    if "fortigate_data" not in locals():
+        fortigate_data = {"source": "offline", "cpu": 0, "mem": 0, "sessions": 0, "error": "unavailable"}
+    if "shuffle_data" not in locals():
+        shuffle_data = {"connected": False, "source": "shuffle", "error": "unavailable"}
 
     alerts = alert_data.get("alerts", [])
     workqueue, sla_summary = _build_workqueue(alerts)
@@ -274,8 +309,9 @@ def executive_overview():
     if top_alert:
         triage += f" Ultimo alerta: {top_alert.get('description', 'Wazuh alert')}."
 
-    return jsonify({
+    payload = {
         "source": "live",
+        "cached": False,
         "range": time_range,
         "errors": errors,
         "kpis": {
@@ -307,7 +343,9 @@ def executive_overview():
         "shuffle": shuffle_data,
         "triage": triage,
         "workqueue": workqueue,
-    })
+    }
+    _executive_cache[cache_key] = (time.time(), payload)
+    return jsonify(payload)
 
 
 # ── Tickets CRUD ───────────────────────────────────────────────────────────
