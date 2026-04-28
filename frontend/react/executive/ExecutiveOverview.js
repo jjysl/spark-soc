@@ -111,8 +111,8 @@
     return h('div', {className: 'card'},
       h('div', {className: 'ch'},
         h('div', null,
-          h('div', {className: 'ct'}, 'Wazuh Alert Investigation Queue'),
-          h('div', {className: 'cs'}, 'Clique em uma linha para expandir os campos originais do Wazuh')
+          h('div', {className: 'ct'}, 'Open Incidents - Service Workqueue'),
+          h('div', {className: 'cs'}, 'Fila executiva baseada em alertas Wazuh; clique para ver evidencias tecnicas')
         ),
         h('span', {className: 'ca'}, `${items.length} itens`)
       ),
