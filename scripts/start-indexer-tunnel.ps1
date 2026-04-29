@@ -73,4 +73,4 @@ if (Test-PortListening -Port $LocalIndexerPort) {
 }
 
 Write-Host "[SPARK] Teste rapido:" -ForegroundColor Cyan
-Write-Host "curl.exe -k -u admin:Spark.SOC+2026 https://localhost:$LocalIndexerPort" -ForegroundColor DarkGray
+Write-Host 'Use Invoke-WebRequest com -Credential ou abra https://localhost:'$LocalIndexerPort' no navegador para validar o tunnel.' -ForegroundColor DarkGray

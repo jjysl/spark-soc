@@ -519,6 +519,42 @@
     );
   }
 
+  function RiskCorrelationPanel({analytics, onFilter}) {
+    const insights = analytics?.insights || [];
+    const summary = analytics?.summary || {};
+    return h('div', {className: 'card', style: {marginBottom: 14}},
+      h('div', {className: 'ch'},
+        h('div', null,
+          h('div', {className: 'ct'}, 'Risk-Based Correlation Engine'),
+          h('div', {className: 'cs'}, analytics?.model || 'severity + frequency + asset criticality + MITRE + FortiGate evidence')
+        ),
+        h('span', {className: 'badge binfo'}, `${fmtNum(summary.high_or_critical)} high risk`)
+      ),
+      insights.length ? h('div', {className: 'compact-list'},
+        insights.map(item => h('div', {className: 'compact-row', key: item.indicator},
+          h('div', {className: 'compact-main'},
+            h('div', {className: 'compact-title'},
+              h('span', {className: `badge ${item.risk_score >= 85 ? 'bcrit' : item.risk_score >= 70 ? 'bhigh' : item.risk_score >= 45 ? 'bmed' : 'binfo'}`}, `${item.risk_score}/100`),
+              h('span', null, item.title),
+              h('span', {className: 'mono'}, item.indicator)
+            ),
+            h('div', {className: 'compact-meta'},
+              `${item.alert_count} alerts | max level ${item.max_level} | ${item.fortigate_signal} | ${item.recommendation}`
+            ),
+            item.mitre?.length ? h('div', {className: 'compact-meta'}, item.mitre.map(value => h('span', {className: 'tpill', key: value}, value))) : null
+          ),
+          h('div', {className: 'row-actions'},
+            item.indicator && item.indicator.includes('.') ? h('button', {className: 'btn', onClick: () => onFilter('src_ip', item.indicator)}, 'Filter IP') : null,
+            item.agents?.[0] ? h('button', {className: 'btn', onClick: () => onFilter('agent.name', item.agents[0])}, 'Filter Host') : null
+          )
+        ))
+      ) : h('div', {className: 'cb'},
+        h('div', {style: {fontSize: 12, fontWeight: 600, color: 'var(--t1)', marginBottom: 4}}, 'No correlated risk clusters yet'),
+        h('div', {style: {fontSize: 11, color: 'var(--tm)'}}, 'The engine only emits insights when real alerts show frequency, severity, MITRE, external IP, critical asset or FortiGate blocklist evidence.')
+      )
+    );
+  }
+
   function TriageRulePanel({filters, rules, setRules}) {
     const [name, setName] = useState('');
     const [priority, setPriority] = useState('P2');
@@ -654,6 +690,7 @@
         h('strong', null, 'SPARK Threat Triage: '),
         error ? `${payload.triage} Keeping the page free of fallback mock data.` : payload.triage
       ),
+      h(RiskCorrelationPanel, {analytics: payload.analytics, onFilter: addFilter}),
       h('div', {className: 'g12', style: {alignItems: 'start'}},
         h('div', {className: 'card'},
           h('div', {className: 'ch'},

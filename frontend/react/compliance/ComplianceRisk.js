@@ -43,6 +43,94 @@
     );
   }
 
+  function frameworkScores(payload) {
+    const modules = payload.modules || {};
+    const agents = payload.agents || {};
+    const activeRatio = agents.total ? Math.round((Number(agents.active || 0) / Number(agents.total || 1)) * 100) : 0;
+    const evidence = {
+      sca: Number(modules.sca || 0),
+      fim: Number(modules.fim || 0),
+      audit: Number(modules.audit || 0),
+      vuln: Number(modules.vulnerability || 0),
+      rootcheck: Number(modules.rootcheck || 0),
+    };
+    const base = Math.min(100, 35 + Math.min(30, activeRatio) + Math.min(25, payload.total_findings ? 15 : 0));
+    return [
+      {label: 'ISO 27001', value: Math.min(96, base + Math.min(12, evidence.sca + evidence.fim)), detail: 'A.8 / A.12 / A.16 evidence'},
+      {label: 'PCI DSS 4.0', value: Math.min(92, base + Math.min(10, evidence.audit + evidence.vuln)), detail: 'Req. 10 / 11 monitoring'},
+      {label: 'LGPD / GDPR', value: Math.min(94, base + Math.min(10, evidence.fim + evidence.audit)), detail: 'Art. 46 security controls'},
+      {label: 'NIST CSF 2.0', value: Math.min(93, base + Math.min(12, evidence.sca + evidence.rootcheck)), detail: 'Detect / Protect / Respond'},
+    ];
+  }
+
+  function FrameworkOverview({payload}) {
+    const rows = frameworkScores(payload);
+    return h(React.Fragment, null,
+      h('div', {className: 'g4'},
+        rows.map(item => {
+          const tone = item.value >= 85 ? 'green' : item.value >= 70 ? 'amber' : 'red';
+          return h(KpiCard, {
+            key: item.label,
+            label: item.label,
+            value: `${item.value}%`,
+            detail: `<span class="${item.value >= 85 ? 'dn' : 'up'}">${item.detail}</span>`,
+            tone,
+          });
+        })
+      ),
+      h('div', {className: 'card', style: {marginBottom: 14}},
+        h('div', {className: 'ch'},
+          h('div', null,
+            h('div', {className: 'ct'}, 'Controls by Framework'),
+            h('div', {className: 'cs'}, 'Evidence-based estimate from Wazuh modules; not an audit attestation')
+          )
+        ),
+        h('div', {className: 'cb'},
+          rows.map(item => {
+            const color = item.value >= 85 ? '#10b981' : item.value >= 70 ? '#f59e0b' : '#da291c';
+            return h('div', {className: 'cbar', key: item.label},
+              h('div', {className: 'chead'},
+                h('span', null, item.label),
+                h('span', {className: 'cval'}, `${item.value}%`)
+              ),
+              h('div', {className: 'ctrack'}, h('div', {className: 'cfill', style: {width: `${item.value}%`, background: color}}))
+            );
+          })
+        )
+      )
+    );
+  }
+
+  function AssetRiskSegments({payload}) {
+    const modules = payload.modules || {};
+    const agents = payload.agents || {};
+    const rows = [
+      {name: 'Endpoint fleet', value: Math.min(100, Number(payload.total_findings || 0) * 12 + Number(agents.disconnected || 0) * 15), detail: 'findings + disconnected agents'},
+      {name: 'Identity / access', value: Math.min(100, Number(modules.audit || 0) * 14 + Number(modules.rootcheck || 0) * 8), detail: 'audit + rootcheck evidence'},
+      {name: 'Data integrity', value: Math.min(100, Number(modules.fim || 0) * 10), detail: 'FIM / syscheck evidence'},
+      {name: 'Vulnerability posture', value: Math.min(100, Number(modules.vulnerability || 0) * 18), detail: 'vulnerability detector evidence'},
+    ];
+    return h('div', {className: 'card'},
+      h('div', {className: 'ch'},
+        h('div', null,
+          h('div', {className: 'ct'}, 'Digital Asset Risk Score by Control Area'),
+          h('div', {className: 'cs'}, 'Risk estimate from live Wazuh compliance telemetry')
+        )
+      ),
+      h('div', {className: 'cb'},
+        rows.map(item => {
+          const color = item.value >= 70 ? '#da291c' : item.value >= 40 ? '#f59e0b' : '#10b981';
+          return h('div', {className: 'rseg', key: item.name},
+            h('div', {className: 'rsname'}, item.name),
+            h('div', {className: 'rsbar'}, h('div', {className: 'rsfill', style: {width: `${Math.max(4, item.value)}%`, background: color}})),
+            h('div', {className: 'rsval'}, item.value),
+            h('div', {style: {fontSize: 10, color: 'var(--tm)', minWidth: 120}}, item.detail)
+          );
+        })
+      )
+    );
+  }
+
   function ControlCoverage({controls}) {
     return h('div', {className: 'card'},
       h('div', {className: 'ch'},
@@ -211,18 +299,13 @@
       ),
       h('div', {className: `aibox ${error ? 'loading' : ''}`},
         h('strong', null, 'Compliance telemetry: '),
-        error ? `API unavailable (${error}). No simulated compliance score is shown.` : 'Showing Wazuh module evidence only. Framework compliance scores require real control mappings.'
+        error ? `API unavailable (${error}). No simulated compliance score is shown.` : 'Framework cards are evidence-based estimates from Wazuh modules, not formal audit attestations.'
       ),
       h('div', {className: 'source-strip'},
         h(SourceChip, {label: 'Wazuh Indexer', ok: indexerOk}),
         h(SourceChip, {label: 'Wazuh Manager', ok: apiOk})
       ),
-      h('div', {className: 'g4'},
-        h(KpiCard, {label: 'Compliance Findings', value: fmtNum(payload.total_findings), detail: `<span class="dn">${fmtNum(payload.returned)}</span> recent findings shown`, critical: Number(payload.total_findings) > 0}),
-        h(KpiCard, {label: 'SCA Events', value: fmtNum(modules.sca), detail: 'Wazuh SCA rule groups'}),
-        h(KpiCard, {label: 'FIM Events', value: fmtNum(modules.fim), detail: 'Wazuh syscheck rule groups'}),
-        h(KpiCard, {label: 'Vuln / Audit Events', value: fmtNum((modules.vulnerability || 0) + (modules.audit || 0)), detail: 'Detector + policy/audit groups'})
-      ),
+      h(FrameworkOverview, {payload}),
       h('div', {className: 'g11'},
         h(ControlCoverage, {controls: payload.controls || []}),
         h(AgentReadiness, {agents: payload.agents, notes: payload.notes})
@@ -230,7 +313,8 @@
       h('div', {className: 'g11'},
         h(FindingTable, {items: payload.findings || []}),
         h(MissingMappings, {notes: payload.notes || {}})
-      )
+      ),
+      h(AssetRiskSegments, {payload})
     );
   }
 

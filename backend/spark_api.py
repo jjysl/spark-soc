@@ -286,7 +286,117 @@ def threat_detection():
             "triage": "Wazuh Indexer is unavailable. Check INDEXER_BASE, INDEXER_USER and INDEXER_PASS.",
             "error": str(exc),
         }
+    analytics = _build_risk_correlations(data.get("alerts", []))
+    data["analytics"] = analytics
+    if analytics.get("insights"):
+        top = analytics["insights"][0]
+        data["triage"] = (
+            f"{data.get('triage', 'Threat analytics ready.')} "
+            f"Top correlation: {top.get('title')} (risk {top.get('risk_score')}/100)."
+        )
     return jsonify(data)
+
+
+def _is_private_ip(value: str) -> bool:
+    text = str(value or "")
+    return text.startswith(("10.", "127.", "192.168.", "169.254.")) or any(
+        text.startswith(f"172.{idx}.") for idx in range(16, 32)
+    )
+
+
+def _build_risk_correlations(alerts: list[dict]) -> dict:
+    """Risk-based correlation engine: severity + frequency + asset + external IP + MITRE + FortiGate evidence."""
+    blocked_ips = {item.get("ip") for item in ticket_store.get_blocked_ips() if item.get("ip")}
+    now = datetime.now(timezone.utc)
+    buckets: dict[str, dict] = {}
+
+    for alert in alerts or []:
+        indicator = alert.get("src_ip") or alert.get("agent_ip") or alert.get("agent_name") or "unknown"
+        item = buckets.setdefault(indicator, {
+            "indicator": indicator,
+            "alerts": [],
+            "rules": set(),
+            "agents": set(),
+            "mitre": set(),
+            "max_level": 0,
+            "external_ip": bool(indicator and not _is_private_ip(indicator) and "." in indicator),
+            "fortigate_signal": indicator in blocked_ips,
+        })
+        level = int(alert.get("level") or 0)
+        item["alerts"].append(alert)
+        item["rules"].add(str(alert.get("rule_id") or ""))
+        item["agents"].add(str(alert.get("agent_name") or "unknown"))
+        if alert.get("mitre_tactic"):
+            item["mitre"].add(str(alert.get("mitre_tactic")))
+        if alert.get("mitre_technique"):
+            item["mitre"].add(str(alert.get("mitre_technique")))
+        item["max_level"] = max(item["max_level"], level)
+
+    insights = []
+    for indicator, item in buckets.items():
+        count = len(item["alerts"])
+        latest = max(
+            (_parse_wazuh_timestamp(alert.get("timestamp", "")) for alert in item["alerts"]),
+            default=None,
+        )
+        recent = bool(latest and (now - latest).total_seconds() <= 3600)
+        asset_text = " ".join(item["agents"]).lower()
+        critical_asset = any(term in asset_text for term in ("server", "dc", "domain", "wazuh", "firewall", "fortigate"))
+        repeated_rule = count > len(item["rules"])
+        brute_force = any(
+            "ssh" in f"{alert.get('description', '')} {alert.get('groups', '')}".lower()
+            or "authentication" in f"{alert.get('description', '')} {alert.get('groups', '')}".lower()
+            for alert in item["alerts"]
+        ) and count >= 3
+        score = min(100, (
+            min(45, item["max_level"] * 4)
+            + min(20, count * 4)
+            + (10 if critical_asset else 0)
+            + (10 if item["external_ip"] else 0)
+            + (8 if item["mitre"] else 0)
+            + (7 if repeated_rule else 0)
+            + (12 if item["fortigate_signal"] else 0)
+        ))
+        if score < 35 and count < 2:
+            continue
+
+        if item["fortigate_signal"]:
+            recommendation = "IP already appears in SPARK/FortiGate blocklist evidence. Validate runtime routing before claiming enforcement."
+        elif brute_force or item["external_ip"] or score >= 70:
+            recommendation = "Create incident case and consider FortiGate blocklist action after analyst validation."
+        elif critical_asset:
+            recommendation = "Start investigation and review host evidence, because a monitored critical asset is involved."
+        else:
+            recommendation = "Monitor and correlate with repeated activity before containment."
+
+        insights.append({
+            "indicator": indicator,
+            "title": "FortiGate blocklist + Wazuh alert correlation" if item["fortigate_signal"] else "Repeated alert cluster" if count >= 3 else "Risk-based detection insight",
+            "risk_score": score,
+            "severity": "critical" if score >= 85 else "high" if score >= 70 else "medium" if score >= 45 else "low",
+            "alert_count": count,
+            "max_level": item["max_level"],
+            "external_ip": item["external_ip"],
+            "critical_asset": critical_asset,
+            "repeated_rule": repeated_rule,
+            "recent": recent,
+            "mitre": sorted(item["mitre"])[:5],
+            "agents": sorted(item["agents"])[:5],
+            "fortigate_signal": "blocklist evidence" if item["fortigate_signal"] else "no FortiGate match",
+            "recommendation": recommendation,
+        })
+
+    insights.sort(key=lambda row: (row["risk_score"], row["alert_count"]), reverse=True)
+    return {
+        "engine": "risk-based correlation",
+        "model": "severity + frequency + critical asset + external IP + MITRE + repetition + FortiGate blocklist evidence",
+        "insights": insights[:8],
+        "summary": {
+            "clusters": len(insights),
+            "high_or_critical": sum(1 for item in insights if item["risk_score"] >= 70),
+            "fortigate_matches": sum(1 for item in insights if item["fortigate_signal"] == "blocklist evidence"),
+        },
+    }
 
 
 def _build_fortigate_correlations(alerts: list[dict], fortigate_data: dict) -> list[dict]:

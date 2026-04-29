@@ -31,7 +31,8 @@ o SPARK acessa ele por um tunnel local em `https://localhost:19200`.
 4. Teste:
 
 ```powershell
-curl.exe -k -u admin:SUA_SENHA_INDEXER https://localhost:19200
+$cred = Get-Credential -UserName admin
+Invoke-WebRequest -Uri https://localhost:19200 -Credential $cred -SkipCertificateCheck
 ```
 
 5. Rode o Flask:
