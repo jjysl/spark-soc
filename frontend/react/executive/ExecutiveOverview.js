@@ -23,6 +23,20 @@
 
   const RANGES = ['1h', '6h', '24h', '7d', '30d'];
 
+  function fmtTime(value) {
+    if (!value) return '--:--';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value.length >= 16 ? value.substring(11, 16) : '--:--';
+    return date.toLocaleTimeString('en-US', {hour12: false, hour: '2-digit', minute: '2-digit'});
+  }
+
+  function fmtDateTime(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString('en-US', {month: 'short', day: '2-digit', year: 'numeric', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit'});
+  }
+
   function TimeSelector({value, onChange, disabled}) {
     return h('div', {className: 'tsel'},
       RANGES.map(item =>
@@ -125,6 +139,8 @@
     const [detailTab, setDetailTab] = useState('table');
     const [fieldFilters, setFieldFilters] = useState([]);
     const [actionState, setActionState] = useState('');
+    const [rowsPerPage, setRowsPerPage] = useState(10);
+    const [page, setPage] = useState(1);
     const normalizedQuery = query.trim().toLowerCase();
     const filteredItems = items.filter(item => {
       const matchesPriority = priority === 'all' || item.priority === priority;
@@ -149,7 +165,20 @@
       const matchesFieldFilters = fieldFilters.every(filter => haystack.includes(String(filter.value).toLowerCase()));
       return matchesPriority && matchesQuery && matchesFieldFilters;
     });
+    const sortedItems = useMemo(() => [...filteredItems].sort((a, b) => {
+      const left = new Date(a.alertTimestamp || a.timestamp || 0).getTime() || 0;
+      const right = new Date(b.alertTimestamp || b.timestamp || 0).getTime() || 0;
+      return right - left;
+    }), [filteredItems]);
+    const totalPages = Math.max(1, Math.ceil(sortedItems.length / rowsPerPage));
+    const currentPage = Math.min(page, totalPages);
+    const visibleItems = sortedItems.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
     const priorities = ['all', 'P1', 'P2', 'P3', 'P4'];
+
+    useEffect(() => {
+      setPage(1);
+      setOpenId(null);
+    }, [rowsPerPage, priority, query, JSON.stringify(fieldFilters), items.length]);
 
     function addFieldFilter(label, value) {
       if (!value) return;
@@ -231,7 +260,10 @@
           h('div', {className: 'ct'}, 'Open Incidents - Service Workqueue'),
           h('div', {className: 'cs'}, 'SLA thresholds: P1 15 min · P2 45 min · P3 90 min · P4 6h · per Fortinet SOCaaS escalation policy')
         ),
-        h('span', {className: 'ca'}, `${filteredItems.length}/${items.length} items`)
+        h('div', {style: {display: 'flex', alignItems: 'center', gap: 12}},
+          h('span', {className: 'ca'}, `${filteredItems.length}/${items.length} items`),
+          h('a', {href: '#', onClick: event => { event.preventDefault(); setRowsPerPage(50); setPage(1); }, style: {fontSize: 11, fontWeight: 600}}, 'View all')
+        )
       ),
       h('div', {className: 'wq-tools'},
         h('input', {
@@ -267,13 +299,13 @@
           )
         ),
         h('tbody', null,
-          filteredItems.length ? filteredItems.flatMap(item => {
+          visibleItems.length ? visibleItems.flatMap(item => {
             const rowKey = `${item.id}-${item.documentId || item.time}`;
             const isOpen = openId === rowKey;
             return [
               h('tr', {key: rowKey, onClick: () => setOpenId(isOpen ? null : rowKey)},
                 h('td', null, h('span', {className: 'mono'}, item.id || 'WAZUH')),
-                h('td', null, h('span', {className: 'mono'}, item.time || '--:--')),
+                h('td', null, h('span', {className: 'mono', title: fmtDateTime(item.alertTimestamp || item.timestamp)}, fmtTime(item.alertTimestamp || item.timestamp))),
                 h('td', null, h('span', {className: 'edesc', title: item.description}, item.description || 'Wazuh alert')),
                 h('td', null, h('span', {className: 'tpill'}, item.tactic || 'Detection')),
                 h('td', null, h('span', {className: `badge ${item.badge || clsPriority(item.priority)}`}, item.priority || 'P3')),
@@ -315,6 +347,22 @@
           }) : h('tr', null,
             h('td', {colSpan: 8, style: {color: 'var(--tm)', textAlign: 'center'}}, 'No alerts match the selected filters')
           )
+        )
+      ),
+      h('div', {style: {display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderTop: '1px solid var(--border)'}},
+        h('div', {style: {display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--tm)'}},
+          h('span', null, 'Rows per page:'),
+          h('select', {
+            className: 'jm-select',
+            style: {width: 86, padding: '5px 8px', fontSize: 11},
+            value: rowsPerPage,
+            onChange: event => setRowsPerPage(Number(event.target.value)),
+          }, [10, 25, 50].map(value => h('option', {key: value, value}, `${value} rows`)))
+        ),
+        h('div', {style: {display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--tm)'}},
+          h('span', null, `${sortedItems.length ? ((currentPage - 1) * rowsPerPage) + 1 : 0}-${Math.min(currentPage * rowsPerPage, sortedItems.length)} of ${sortedItems.length}`),
+          h('button', {className: 'btn', disabled: currentPage <= 1, onClick: () => setPage(value => Math.max(1, value - 1))}, 'Prev'),
+          h('button', {className: 'btn', disabled: currentPage >= totalPages, onClick: () => setPage(value => Math.min(totalPages, value + 1))}, 'Next')
         )
       )
     );
