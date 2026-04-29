@@ -267,7 +267,7 @@
         ),
         h('div', {style: {display: 'flex', alignItems: 'center', gap: 12}},
           h('span', {className: 'ca'}, `${filteredItems.length}/${items.length} items`),
-          h('a', {href: '#', onClick: event => { event.preventDefault(); setRowsPerPage(50); setPage(1); }, style: {fontSize: 11, fontWeight: 600}}, 'View all')
+          h('button', {className: 'btn btnlink', onClick: () => { setRowsPerPage(50); setPage(1); }}, 'View all')
         )
       ),
       h('div', {className: 'wq-tools'},

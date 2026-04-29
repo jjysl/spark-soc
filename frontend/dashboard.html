@@ -53,6 +53,8 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
 .ha{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
 .btn{font-family:'Inter',sans-serif;font-size:12px;font-weight:500;padding:6px 12px;border-radius:var(--r);border:1px solid var(--border-s);background:var(--white);color:var(--t2);cursor:pointer;transition:background .12s;line-height:1.25;min-height:30px}
 .btn:hover{background:var(--bg)}.btnp{background:var(--red);color:#fff;border-color:var(--red)}.btnp:hover{background:#c0241a}
+.btnlink{border:none;background:transparent;color:var(--blue);padding:3px 0;min-height:0;font-size:11px;font-weight:700}
+.btnlink:hover{background:transparent;color:#0f3fa8;text-decoration:underline}
 .tsel{display:flex;background:var(--white);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
 .tsel span{padding:5px 10px;font-size:12px;font-weight:500;color:var(--tm);cursor:pointer;border-right:1px solid var(--border);transition:background .12s,color .12s}
 .tsel span:last-child{border-right:none}.tsel span:hover{background:var(--bg);color:var(--t1)}.tsel span.active{background:#1a1f2e;color:#fff}
@@ -499,7 +501,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
   <div id="network-root">
     <div class="ph">
       <div><div class="ptitle">FortiGate &amp; Endpoint Monitoring</div><div class="psub"><span class="ldot"></span>Loading FortiOS REST API and Wazuh telemetry...</div></div>
-      <div class="ha"><button class="btn" disabled>Export Topology</button><button class="btn btnp" disabled>Quarantine Host</button></div>
+      <div class="ha"><button class="btn" disabled>Export Evidence</button><button class="btn btnp" disabled>Open Response</button></div>
     </div>
     <div class="aibox loading"><strong>Network telemetry:</strong> Waiting for live source status.</div>
   </div>
@@ -510,7 +512,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
   <div id="incident-root">
     <div class="ph">
       <div><div class="ptitle">Incident Response &amp; SOAR Automation</div><div class="psub"><span class="ldot"></span>Loading Wazuh candidates and Shuffle status...</div></div>
-      <div class="ha"><button class="btn" disabled>Forensic Report</button><button class="btn btnp" disabled>Isolate Host via API</button></div>
+      <div class="ha"><button class="btn" disabled>Refresh</button><button class="btn btnp" disabled>Cases &amp; Response</button></div>
     </div>
     <div class="aibox loading"><strong>Incident Response:</strong> Waiting for live source status.</div>
   </div>
@@ -541,10 +543,9 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
 <footer class="footer">
   <div>SPARK SOC — NG-SOC as a Service &nbsp;·&nbsp; FIAP / Fortinet Challenge 2025 &nbsp;·&nbsp; Team: Diogo, José, Júlio, Matheus, Rafael</div>
   <div class="fsys">
-    <span>Wazuh <span class="fsok">Connected</span></span>
-    <span>Shuffle SOAR <span class="fsok">Connected</span></span>
-    <span>FortiGate <span class="fsok">Connected</span></span>
-    <span>Fortinet Fabric <span class="fsok">Ready</span></span>
+    <span>Telemetry <span class="fsok">API-driven</span></span>
+    <span>Response <span class="fsok">FortiOS REST</span></span>
+    <span>SOAR <span class="fsok">Shuffle webhook</span></span>
     <span class="mts" id="footerClock">--:--:-- UTC</span>
   </div>
 </footer>

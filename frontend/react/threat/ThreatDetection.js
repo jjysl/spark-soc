@@ -299,7 +299,7 @@
           h('div', {className: 'cs'}, 'Wazuh + FortiGate - AI-enriched - Fabric Monitoring')
         ),
         h('div', {style: {display: 'flex', alignItems: 'center', gap: 12}},
-          h('a', {href: '#', onClick: event => { event.preventDefault(); setRowsPerPage(50); setPage(1); }, className: 'ca'}, 'View all')
+          h('button', {className: 'btn btnlink', onClick: () => { setRowsPerPage(50); setPage(1); }}, 'View all')
         )
       ),
       filters.length ? h('div', {className: 'filter-tokens'},

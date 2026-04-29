@@ -243,6 +243,7 @@
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const [updatedAt, setUpdatedAt] = useState(null);
+    const [message, setMessage] = useState('');
 
     async function load() {
       setLoading(true);
@@ -296,17 +297,43 @@
       return 'Waiting for Wazuh compliance modules.';
     }, [loading, updatedAt, range]);
 
+    function exportComplianceReport() {
+      const report = {
+        generated_at: new Date().toISOString(),
+        range,
+        framework_estimates: frameworkScores(payload),
+        modules: payload.modules || {},
+        findings: payload.findings || [],
+        agents: payload.agents || {},
+        note: 'Framework scores are evidence-based posture estimates, not formal audit attestations.',
+      };
+      const blob = new Blob([JSON.stringify(report, null, 2)], {type: 'application/json'});
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `spark-compliance-evidence-${range}-${Date.now()}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setMessage('Compliance evidence report exported as JSON.');
+    }
+
     return h(React.Fragment, null,
       h('div', {className: 'ph'},
         h('div', null,
           h('div', {className: 'ptitle'}, 'Compliance & Risk Management'),
           h('div', {className: 'psub'}, h('span', {className: 'ldot'}), status)
         ),
-        h('div', {className: 'ha'}, h(RangeControl, {value: range, onChange: setRange}), h('button', {className: 'btn'}, 'Schedule Report'), h('button', {className: 'btn btnp'}, 'Generate Compliance Report'))
+        h('div', {className: 'ha'},
+          h(RangeControl, {value: range, onChange: setRange}),
+          h('button', {className: 'btn', onClick: () => setMessage('Report scheduling is handled outside the lab build; use Generate Report for evidence export.')}, 'Schedule Report'),
+          h('button', {className: 'btn btnp', onClick: exportComplianceReport}, 'Generate Report')
+        )
       ),
       h('div', {className: `aibox ${error ? 'loading' : ''}`},
         h('strong', null, 'Compliance telemetry: '),
-        error ? `API unavailable (${error}). No simulated compliance score is shown.` : 'Framework cards are evidence-based estimates from Wazuh modules, not formal audit attestations.'
+        message || (error ? `API unavailable (${error}). No simulated compliance score is shown.` : 'Framework cards are evidence-based estimates from Wazuh modules, not formal audit attestations.')
       ),
       h('div', {className: 'source-strip'},
         h(SourceChip, {label: 'Wazuh Indexer', ok: indexerOk}),

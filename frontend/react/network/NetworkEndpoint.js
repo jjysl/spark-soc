@@ -374,6 +374,7 @@
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const [updatedAt, setUpdatedAt] = useState(null);
+    const [message, setMessage] = useState('');
 
     async function load() {
       setLoading(true);
@@ -407,6 +408,26 @@
       return () => clearInterval(timer);
     }, []);
 
+    function exportTopology() {
+      const snapshot = {
+        generated_at: new Date().toISOString(),
+        fortigate: payload.fortigate,
+        wazuh: payload.wazuh,
+        correlations: payload.correlations || [],
+        blocklist: payload.fortigate?.blocklist || {},
+      };
+      const blob = new Blob([JSON.stringify(snapshot, null, 2)], {type: 'application/json'});
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `spark-network-topology-${Date.now()}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setMessage('Network topology evidence exported as JSON.');
+    }
+
     const payload = data || {
       source: 'loading',
       errors: {},
@@ -434,11 +455,14 @@
           h('div', {className: 'ptitle'}, 'Network & Endpoint Monitoring'),
           h('div', {className: 'psub'}, h('span', {className: 'ldot'}), statusText)
         ),
-        h('div', {className: 'ha'}, h('button', {className: 'btn'}, 'Export Topology'), h('button', {className: 'btn btnp'}, 'Quarantine Host'))
+        h('div', {className: 'ha'},
+          h('button', {className: 'btn', onClick: exportTopology}, 'Export Evidence'),
+          h('button', {className: 'btn btnp', onClick: () => document.querySelector('button[onclick*="ir"]')?.click()}, 'Open Response')
+        )
       ),
       h('div', {className: `aibox ${error ? 'loading' : ''}`},
         h('strong', null, 'Network telemetry: '),
-        error ? `API unavailable (${error}). No simulated network data is shown.` : 'Rendering only FortiGate Monitor API, Wazuh Manager API and SPARK-owned records.'
+        message || (error ? `API unavailable (${error}). No simulated network data is shown.` : 'Rendering only FortiGate Monitor API, Wazuh Manager API and SPARK-owned records.')
       ),
       h('div', {className: 'source-strip'},
         h(SourceChip, {label: 'FortiGate', ok: fgOk}),
