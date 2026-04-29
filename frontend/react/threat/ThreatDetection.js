@@ -19,7 +19,25 @@
   }
 
   function fmtTime(value) {
-    return value && value.length >= 19 ? value.substring(11, 19) : '--:--:--';
+    if (!value) return '--:--:--';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value.length >= 19 ? value.substring(11, 19) : '--:--:--';
+    return date.toLocaleTimeString('en-US', {hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit'});
+  }
+
+  function fmtDateTime(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: '2-digit',
+      year: 'numeric',
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
   }
 
   function shortTactic(value) {
@@ -170,6 +188,16 @@
   function AlertFeed({alerts, total, filters, setFilters, search, setSearch, range, setRange}) {
     const [openId, setOpenId] = useState('');
     const [detailTab, setDetailTab] = useState('summary');
+    const [rowsPerPage, setRowsPerPage] = useState(10);
+    const [page, setPage] = useState(1);
+    const sortedAlerts = useMemo(() => [...(alerts || [])].sort((a, b) => {
+      const left = new Date(a.timestamp || 0).getTime() || 0;
+      const right = new Date(b.timestamp || 0).getTime() || 0;
+      return right - left;
+    }), [alerts]);
+    const totalPages = Math.max(1, Math.ceil(sortedAlerts.length / rowsPerPage));
+    const currentPage = Math.min(page, totalPages);
+    const visibleAlerts = sortedAlerts.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
 
     function addFilter(field, value) {
       if (!value) return;
@@ -177,13 +205,21 @@
       setFilters(items => items.some(item => item.field === field && item.value === String(value)) ? items : [...items, {field, value: String(value)}]);
     }
 
+    useEffect(() => {
+      setPage(1);
+      setOpenId('');
+    }, [rowsPerPage, range, search, JSON.stringify(filters), alerts.length]);
+
     return h('div', {className: 'card'},
       h('div', {className: 'ch'},
         h('div', null,
           h('div', {className: 'ct'}, 'Correlated Alert Feed'),
           h('div', {className: 'cs'}, 'Wazuh Indexer - normalized analyst view - click values to filter')
         ),
-        h('span', {className: 'ca'}, `${fmtNum(total)} alerts`)
+        h('div', {style: {display: 'flex', alignItems: 'center', gap: 12}},
+          h('span', {className: 'ca'}, `${fmtNum(total)} alerts`),
+          h('a', {href: '#', onClick: event => { event.preventDefault(); setRowsPerPage(50); setPage(1); }, style: {fontSize: 11, fontWeight: 600}}, 'View all')
+        )
       ),
       h('div', {className: 'wq-tools'},
         h('input', {
@@ -203,12 +239,12 @@
       h('table', {className: 'ftable'},
         h('thead', null, h('tr', null, ['Time', 'Source IP', 'Agent', 'Rule', 'MITRE', 'Priority', 'Status'].map(col => h('th', {key: col}, col)))),
         h('tbody', null,
-          alerts.length ? alerts.flatMap(alert => {
+          visibleAlerts.length ? visibleAlerts.flatMap(alert => {
             const id = String(alert.document_id || `${alert.rule_id}-${alert.timestamp}`);
             const isOpen = openId === id;
             return [
               h('tr', {key: id, onClick: () => setOpenId(isOpen ? '' : id)},
-                h('td', null, h('span', {className: 'mono'}, fmtTime(alert.timestamp))),
+                h('td', null, h('span', {className: 'mono', title: fmtDateTime(alert.timestamp)}, fmtTime(alert.timestamp))),
                 h('td', null, h(FilterButton, {field: 'src_ip', value: alert.src_ip, label: alert.src_ip || alert.agent_ip || '--', onFilter: addFilter})),
                 h('td', null, h(FilterButton, {field: 'agent.name', value: alert.agent_name, label: alert.agent_name || 'unknown', onFilter: addFilter})),
                 h('td', null,
@@ -222,6 +258,22 @@
               isOpen ? h(AlertDetail, {key: `${id}-detail`, alert, tab: detailTab, setTab: setDetailTab, onFilter: addFilter}) : null,
             ].filter(Boolean);
           }) : h('tr', null, h('td', {colSpan: 7, style: {color: 'var(--tm)', fontSize: 12}}, 'No Wazuh alerts matched the current query.'))
+        )
+      ),
+      h('div', {style: {display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderTop: '1px solid var(--border)'}},
+        h('div', {style: {display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--tm)'}},
+          h('span', null, 'Rows per page:'),
+          h('select', {
+            className: 'jm-select',
+            style: {width: 86, padding: '5px 8px', fontSize: 11},
+            value: rowsPerPage,
+            onChange: event => setRowsPerPage(Number(event.target.value)),
+          }, [10, 25, 50].map(value => h('option', {key: value, value}, `${value} rows`)))
+        ),
+        h('div', {style: {display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--tm)'}},
+          h('span', null, `${sortedAlerts.length ? ((currentPage - 1) * rowsPerPage) + 1 : 0}-${Math.min(currentPage * rowsPerPage, sortedAlerts.length)} of ${sortedAlerts.length}`),
+          h('button', {className: 'btn', disabled: currentPage <= 1, onClick: () => setPage(value => Math.max(1, value - 1))}, 'Prev'),
+          h('button', {className: 'btn', disabled: currentPage >= totalPages, onClick: () => setPage(value => Math.min(totalPages, value + 1))}, 'Next')
         )
       )
     );
