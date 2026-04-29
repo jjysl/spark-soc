@@ -289,14 +289,46 @@ def threat_detection():
     return jsonify(data)
 
 
+def _build_fortigate_correlations(alerts: list[dict], fortigate_data: dict) -> list[dict]:
+    """Correlate Wazuh network indicators with live FortiGate config/monitor data."""
+    policies = fortigate_data.get("policies", []) or []
+    interfaces = fortigate_data.get("interfaces", []) or []
+    blocked = ticket_store.get_blocked_ips()
+    policy_text = " ".join(
+        f"{item.get('name', '')} {item.get('srcaddr', '')} {item.get('dstaddr', '')} {item.get('service', '')} {item.get('comments', '')}"
+        for item in policies
+    ).lower()
+    interface_names = {str(item.get("name", "")).lower() for item in interfaces if item.get("name")}
+    blocked_ips = {item.get("ip") or item.get("src_ip") for item in blocked}
+    rows = []
+    for alert in alerts:
+        src_ip = alert.get("src_ip") or alert.get("agent_ip") or ""
+        dst_ip = alert.get("dst_ip") or ""
+        location = str(alert.get("location") or "").lower()
+        matched_interfaces = [name for name in interface_names if name and name in location]
+        policy_match = bool(src_ip and src_ip.lower() in policy_text) or bool(dst_ip and dst_ip.lower() in policy_text)
+        rows.append({
+            "timestamp": alert.get("timestamp", ""),
+            "description": alert.get("description") or "Wazuh alert",
+            "src_ip": src_ip,
+            "dst_ip": dst_ip,
+            "agent": alert.get("agent_name", ""),
+            "priority": alert.get("priority", "P3"),
+            "mitre_tactic": alert.get("mitre_tactic", ""),
+            "fortigate_signal": "blocked" if src_ip in blocked_ips else "policy match" if policy_match else "interface context" if matched_interfaces else "no direct policy match",
+            "matched_interfaces": matched_interfaces,
+        })
+    return rows
+
+
 @spark_bp.route("/spark/network-endpoint")
 def network_endpoint():
     errors: dict[str, str] = {}
-    executor = ThreadPoolExecutor(max_workers=2)
+    executor = ThreadPoolExecutor(max_workers=3)
     try:
         futures = {
             "fortigate": executor.submit(
-                fortigate.get_resource_usage,
+                fortigate.get_network_inventory,
                 config.FORTIGATE_BASE_URL,
                 config.FORTIGATE_API_KEY,
             ),
@@ -305,6 +337,16 @@ def network_endpoint():
                 config.WAZUH_BASE,
                 config.WAZUH_USER,
                 config.WAZUH_PASS,
+            ),
+            "alerts": executor.submit(
+                wazuh.get_threat_detection_alerts,
+                config.INDEXER_BASE,
+                config.INDEXER_USER,
+                config.INDEXER_PASS,
+                "24h",
+                "",
+                [],
+                20,
             ),
         }
         try:
@@ -320,6 +362,13 @@ def network_endpoint():
             agents = {"total": 0, "active": 0, "disconnected": 0, "pending": 0, "agents": [], "error": "timeout"}
         except Exception as exc:
             agents = {"total": 0, "active": 0, "disconnected": 0, "pending": 0, "agents": [], "error": str(exc)}
+
+        try:
+            alert_data = futures["alerts"].result(timeout=8)
+        except TimeoutError:
+            alert_data = {"alerts": [], "total": 0, "error": "timeout"}
+        except Exception as exc:
+            alert_data = {"alerts": [], "total": 0, "error": str(exc)}
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
 
@@ -334,6 +383,8 @@ def network_endpoint():
         }
     if agents.get("error"):
         errors["wazuh_api"] = agents["error"]
+    if alert_data.get("error"):
+        errors["wazuh_indexer"] = alert_data["error"]
 
     agent_items = agents.get("agents", [])
     endpoint_status = {
@@ -344,15 +395,22 @@ def network_endpoint():
         "agents": agent_items,
     }
     blocked = ticket_store.get_blocked_ips()
+    correlations = _build_fortigate_correlations(alert_data.get("alerts", []), fortigate_data)
     return jsonify({
         "source": "live" if not errors else "partial",
         "errors": errors,
         "fortigate": fortigate_data,
         "wazuh": endpoint_status,
+        "wazuh_alerts": {
+            "total": alert_data.get("total", 0),
+            "alerts": alert_data.get("alerts", []),
+        },
+        "correlations": correlations,
         "blocked_ips": blocked,
         "notes": {
-            "sessions": "FortiGate session endpoint is not enabled for this page until validated in the lab.",
+            "sessions": "Active session count is read from FortiGate resource usage. Detailed session list depends on FortiOS endpoint availability.",
             "endpoint_agents": "Wazuh agent inventory reflects the Wazuh Manager API. Only real registered agents are shown.",
+            "fortigate": "Interface, policy, route and policy-stat tables are populated only when the FortiOS REST endpoint is available to the API token.",
         },
     })
 
