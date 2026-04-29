@@ -12,6 +12,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _token_cache: dict = {"token": None, "time": 0}
+_agents_cache: dict = {"data": None, "time": 0}
 THREAT_FILTER_FIELDS = {
     "rule.id": "rule.id",
     "rule.level": "rule.level",
@@ -50,6 +51,11 @@ def get_wazuh_token(base: str, user: str, password: str) -> str:
     return token
 
 
+def clear_wazuh_token() -> None:
+    _token_cache["token"] = None
+    _token_cache["time"] = 0
+
+
 def wazuh_request(base: str, path: str, token: str) -> dict:
     r = requests.get(
         f"{base}{path}",
@@ -59,6 +65,19 @@ def wazuh_request(base: str, path: str, token: str) -> dict:
     )
     r.raise_for_status()
     return r.json()
+
+
+def wazuh_authenticated_request(base: str, user: str, password: str, path: str) -> dict:
+    token = get_wazuh_token(base, user, password)
+    try:
+        return wazuh_request(base, path, token)
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else None
+        if status != 401:
+            raise
+        clear_wazuh_token()
+        token = get_wazuh_token(base, user, password)
+        return wazuh_request(base, path, token)
 
 
 # ── OpenSearch Alerts ──────────────────────────────────────────────────────
@@ -153,24 +172,38 @@ def get_alerts_sqlite_fallback(db_path: str) -> dict:
 # ── SQLite Queries (usadas pelo spark_api) ─────────────────────────────────
 
 def get_agents_summary(wazuh_base: str, wazuh_user: str, wazuh_pass: str) -> dict:
-    token = get_wazuh_token(wazuh_base, wazuh_user, wazuh_pass)
-    data = wazuh_request(
-        wazuh_base,
-        "/agents?select=id,name,ip,status,version&limit=500",
-        token,
-    )
+    try:
+        data = wazuh_authenticated_request(
+            wazuh_base,
+            wazuh_user,
+            wazuh_pass,
+            "/agents?select=id,name,ip,status,version&limit=500",
+        )
+    except Exception as exc:
+        cached = _agents_cache.get("data")
+        if cached and (time.time() - _agents_cache.get("time", 0)) < 300:
+            fallback = dict(cached)
+            fallback["stale"] = True
+            fallback["warning"] = str(exc)
+            return fallback
+        raise
+
     agents = data.get("data", {}).get("affected_items", [])
     by_status: dict[str, int] = {}
     for agent in agents:
         status = agent.get("status", "unknown")
         by_status[status] = by_status.get(status, 0) + 1
-    return {
+    summary = {
         "total": data.get("data", {}).get("total_affected_items", len(agents)),
         "active": by_status.get("active", 0),
         "disconnected": by_status.get("disconnected", 0),
         "pending": by_status.get("pending", 0),
         "agents": agents,
+        "stale": False,
     }
+    _agents_cache["data"] = summary
+    _agents_cache["time"] = time.time()
+    return summary
 
 
 def get_executive_alerts(indexer_base: str, user: str, password: str, time_range: str = "24h") -> dict:
