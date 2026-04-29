@@ -349,7 +349,7 @@ def promote_alerts_to_cases(alerts: list[dict], sla_policy: dict[str, int]) -> l
                     location, src_ip, dst_ip, src_port, dst_port, mitre_tactic,
                     mitre_technique, raw_summary, raw_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', 'Unassigned', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', 'Unassigned', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     case_id,
