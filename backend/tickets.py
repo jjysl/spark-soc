@@ -82,12 +82,69 @@ def init_case_store() -> None:
 init_case_store()
 
 
+def init_ticket_store() -> None:
+    conn = _db()
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tickets (
+            ticket_id TEXT PRIMARY KEY,
+            payload TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+    rows = conn.execute("SELECT payload FROM tickets").fetchall()
+    _tickets.clear()
+    for row in rows:
+        try:
+            ticket = json.loads(row["payload"])
+        except (TypeError, ValueError):
+            continue
+        if ticket.get("id"):
+            _tickets[ticket["id"]] = ticket
+    conn.close()
+
+
+def _persist_ticket(ticket: dict) -> None:
+    conn = _db()
+    now = _iso_now()
+    conn.execute(
+        """
+        INSERT INTO tickets (ticket_id, payload, created_at, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(ticket_id) DO UPDATE SET
+            payload = excluded.payload,
+            updated_at = excluded.updated_at
+        """,
+        (
+            ticket["id"],
+            json.dumps(ticket, ensure_ascii=False, sort_keys=True),
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _delete_persisted_ticket(ticket_id: str) -> None:
+    conn = _db()
+    conn.execute("DELETE FROM tickets WHERE ticket_id = ?", (ticket_id,))
+    conn.commit()
+    conn.close()
+
+
 def _now_label() -> str:
     return datetime.now(timezone.utc).strftime("%H:%M UTC")
 
 
 def _iso_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+init_ticket_store()
 
 
 def _parse_iso(value: str | None) -> datetime | None:
@@ -151,10 +208,16 @@ def create_ticket(data: dict) -> dict:
         "playbook": data.get("playbook", ""),
         "aiAnalysis": data.get("aiAnalysis", ""),
         "aiGenerated": data.get("aiGenerated", False),
+        "externalProvider": data.get("externalProvider", ""),
+        "externalKey": data.get("externalKey", ""),
+        "externalUrl": data.get("externalUrl", ""),
+        "syncStatus": data.get("syncStatus", "local"),
+        "syncMessage": data.get("syncMessage", ""),
         "created": now,
         "updated": now,
     }
     _tickets[ticket["id"]] = ticket
+    _persist_ticket(ticket)
     if ticket["escalatedTo"]:
         _register_escalation(ticket)
     return ticket
@@ -168,7 +231,8 @@ def update_ticket(ticket_id: str, data: dict) -> dict | None:
     updatable = [
         "title", "status", "priority", "type", "assignee", "incidentLink",
         "mitre", "ip", "country", "ipBlocked", "escalatedTo", "escalationReason",
-        "desc", "playbook", "aiAnalysis",
+        "desc", "playbook", "aiAnalysis", "externalProvider", "externalKey",
+        "externalUrl", "syncStatus", "syncMessage",
     ]
     for field in updatable:
         if field in data:
@@ -176,6 +240,21 @@ def update_ticket(ticket_id: str, data: dict) -> dict | None:
     ticket["updated"] = _now_label()
     if ticket["escalatedTo"] and ticket["escalatedTo"] != old_escalation:
         _register_escalation(ticket)
+    _persist_ticket(ticket)
+    return ticket
+
+
+def mark_ticket_sync(ticket_id: str, provider: str, key: str, url: str, status: str, message: str = "") -> dict | None:
+    ticket = _tickets.get(ticket_id)
+    if not ticket:
+        return None
+    ticket["externalProvider"] = provider
+    ticket["externalKey"] = key
+    ticket["externalUrl"] = url
+    ticket["syncStatus"] = status
+    ticket["syncMessage"] = message
+    ticket["updated"] = _now_label()
+    _persist_ticket(ticket)
     return ticket
 
 
@@ -183,6 +262,7 @@ def delete_ticket(ticket_id: str) -> bool:
     if ticket_id not in _tickets:
         return False
     del _tickets[ticket_id]
+    _delete_persisted_ticket(ticket_id)
     return True
 
 

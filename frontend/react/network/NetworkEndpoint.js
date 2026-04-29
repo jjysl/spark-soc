@@ -147,6 +147,99 @@
     );
   }
 
+  function protocolRows(policies) {
+    const counts = new Map();
+    (policies || []).forEach(policy => {
+      const raw = String(policy.service || '').toUpperCase();
+      const services = raw.split(',').map(item => item.trim()).filter(Boolean);
+      (services.length ? services : ['UNSPECIFIED']).forEach(service => {
+        let label = service;
+        if (service.includes('HTTPS')) label = 'HTTPS / 443';
+        else if (service.includes('HTTP')) label = 'HTTP / 80';
+        else if (service.includes('DNS')) label = 'DNS / 53';
+        else if (service.includes('SSH')) label = 'SSH / 22';
+        else if (service.includes('SMB')) label = 'SMB / 445';
+        else if (service.includes('PING') || service.includes('ICMP')) label = 'ICMP';
+        else if (service === 'ALL') label = 'ANY / ALL';
+        counts.set(label, (counts.get(label) || 0) + 1);
+      });
+    });
+    const total = Math.max(1, [...counts.values()].reduce((sum, value) => sum + value, 0));
+    return [...counts.entries()]
+      .map(([label, count]) => ({label, count, pct: Math.round((count / total) * 100)}))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6);
+  }
+
+  function ProtocolDistribution({policies}) {
+    const rows = protocolRows(policies);
+    const colors = ['#3b82f6', '#8b5cf6', '#da291c', '#10b981', '#f59e0b', '#9ca3af'];
+    return h('div', {className: 'card'},
+      h('div', {className: 'ch'},
+        h('div', null,
+          h('div', {className: 'ct'}, 'Traffic by Policy Service'),
+          h('div', {className: 'cs'}, 'Derived from live FortiGate firewall policies')
+        ),
+        h('span', {className: 'ca'}, `${rows.length} services`)
+      ),
+      h('div', {className: 'cb'},
+        rows.length ? rows.map((row, idx) => h('div', {className: 'nbar', key: row.label},
+          h('span', {className: 'nl'}, row.label),
+          h('div', {className: 'ntrack'}, h('div', {className: 'nfill', style: {width: `${row.pct}%`, background: colors[idx % colors.length]}})),
+          h('span', {className: 'nval'}, `${row.pct}%`)
+        )) : h(EmptyState, {title: 'No policy service data', detail: 'Firewall policy service fields are required to derive protocol distribution.'})
+      )
+    );
+  }
+
+  function FabricTopology({fortigate, wazuh}) {
+    const interfaces = fortigate?.interfaces || [];
+    const agents = wazuh?.agents || [];
+    const wan = interfaces.find(item => /wan|port1|internet/i.test(`${item.name} ${item.role}`)) || interfaces[0] || {};
+    const lan = interfaces.find(item => /lan|internal|port2/i.test(`${item.name} ${item.role}`)) || interfaces[1] || {};
+    const server = agents[0] || {};
+    const endpoint = agents[1] || agents[0] || {};
+
+    return h('div', {className: 'card'},
+      h('div', {className: 'ch'},
+        h('div', null,
+          h('div', {className: 'ct'}, 'Live Fabric Topology'),
+          h('div', {className: 'cs'}, 'FortiGate interfaces + Wazuh registered agents')
+        ),
+        h('span', {className: 'badge blive'}, 'Live')
+      ),
+      h('div', {className: 'twrap'},
+        h('svg', {viewBox: '0 0 440 190', role: 'img', 'aria-label': 'SPARK SOC live topology'},
+          h('line', {x1: 220, y1: 92, x2: 78, y2: 45, stroke: '#c8cdd5', strokeWidth: 1.5}),
+          h('line', {x1: 220, y1: 92, x2: 78, y2: 142, stroke: '#c8cdd5', strokeWidth: 1.5}),
+          h('line', {x1: 220, y1: 92, x2: 365, y2: 45, stroke: '#c8cdd5', strokeWidth: 1.5}),
+          h('line', {x1: 220, y1: 92, x2: 365, y2: 142, stroke: '#c8cdd5', strokeWidth: 1.5}),
+          h('circle', {cx: 220, cy: 92, r: 24, fill: '#da291c'}),
+          h('text', {x: 220, y: 128, textAnchor: 'middle', fontSize: 10, fill: '#4a5568'}, 'FortiGate'),
+          h('circle', {cx: 78, cy: 45, r: 16, fill: '#3b82f6'}),
+          h('text', {x: 78, y: 72, textAnchor: 'middle', fontSize: 9, fill: '#4a5568'}, lan.name || 'LAN'),
+          h('circle', {cx: 78, cy: 142, r: 16, fill: '#3b82f6'}),
+          h('text', {x: 78, y: 169, textAnchor: 'middle', fontSize: 9, fill: '#4a5568'}, wan.name || 'WAN'),
+          h('circle', {cx: 365, cy: 45, r: 16, fill: '#10b981'}),
+          h('text', {x: 365, y: 72, textAnchor: 'middle', fontSize: 9, fill: '#4a5568'}, server.name || 'Wazuh'),
+          h('circle', {cx: 365, cy: 142, r: 16, fill: endpoint.status === 'active' ? '#10b981' : '#f59e0b'}),
+          h('text', {x: 365, y: 169, textAnchor: 'middle', fontSize: 9, fill: '#4a5568'}, endpoint.name || 'Endpoint')
+        ),
+        h('div', {style: {display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginTop: 10}},
+          [
+            ['FortiGate', fortigate?.serial || fortigate?.system?.serial || '--'],
+            ['LAN Interface', lan.ip || lan.status || '--'],
+            ['WAN Interface', wan.ip || wan.status || '--'],
+            ['Agents', fmtNum(wazuh?.total || agents.length)],
+          ].map(([label, value]) => h('div', {className: 'detail-cell', key: label},
+            h('div', {className: 'detail-label'}, label),
+            h('div', {className: 'detail-value'}, value)
+          ))
+        )
+      )
+    );
+  }
+
   function FortiGateRoutes({routes}) {
     const rows = Array.isArray(routes) ? routes : [];
     return h('div', {className: 'card'},
@@ -170,31 +263,6 @@
           ))
         )
       ) : h(EmptyState, {title: 'No static routes returned', detail: 'The CMDB router/static endpoint may be unavailable or empty.'})
-    );
-  }
-
-  function FortiGateCorrelation({rows}) {
-    const items = Array.isArray(rows) ? rows : [];
-    return h('div', {className: 'card'},
-      h('div', {className: 'ch'},
-        h('div', null,
-          h('div', {className: 'ct'}, 'Wazuh + FortiGate Correlation'),
-          h('div', {className: 'cs'}, 'Wazuh alerts mapped against FortiGate interfaces, policies and SPARK block records')
-        ),
-        h('span', {className: 'ca'}, `${items.length} alerts`)
-      ),
-      items.length ? h('table', {className: 'ftable'},
-        h('thead', null, h('tr', null, ['Time', 'Alert', 'Source', 'MITRE', 'FortiGate Signal'].map(col => h('th', {key: col}, col)))),
-        h('tbody', null,
-          items.slice(0, 10).map((item, idx) => h('tr', {key: `${item.timestamp}-${idx}`},
-            h('td', null, h('span', {className: 'mono'}, item.timestamp ? item.timestamp.substring(11, 19) : '--')),
-            h('td', null, h('span', {className: 'edesc', title: item.description}, item.description || '--')),
-            h('td', null, h('span', {className: 'mono'}, item.src_ip || item.agent || '--')),
-            h('td', null, h('span', {className: 'tpill'}, item.mitre_tactic || 'Detection')),
-            h('td', null, h('span', {className: `badge ${item.fortigate_signal === 'blocked' ? 'bcrit' : item.fortigate_signal === 'policy match' ? 'blive' : 'binfo'}`}, item.fortigate_signal || 'unmapped'))
-          ))
-        )
-      ) : h(EmptyState, {title: 'No Wazuh alerts available for correlation', detail: 'Generate endpoint/network alerts, then refresh this page to see cross-source correlation.'})
     );
   }
 
@@ -357,12 +425,16 @@
         h(FortiGateApiEvidence, {apiStatus: payload.fortigate?.api_status})
       ),
       h('div', {className: 'g11'},
-        h(FortiGateInterfaces, {interfaces: payload.fortigate?.interfaces}),
-        h(FortiGateRoutes, {routes: payload.fortigate?.routes})
+        h(FabricTopology, {fortigate: payload.fortigate, wazuh: payload.wazuh}),
+        h(ProtocolDistribution, {policies: payload.fortigate?.policies})
       ),
       h('div', {className: 'g11'},
         h(FortiGatePolicies, {policies: payload.fortigate?.policies, stats: payload.fortigate?.policy_stats}),
-        h(FortiGateCorrelation, {rows: payload.correlations})
+        h(FortiGateInterfaces, {interfaces: payload.fortigate?.interfaces})
+      ),
+      h('div', {className: 'g11'},
+        h(FortiGateRoutes, {routes: payload.fortigate?.routes}),
+        h(TopologySummary, {data: payload})
       ),
       h('div', {className: 'g11'},
         h(EndpointInventory, {wazuh: payload.wazuh, ok: wzOk}),

@@ -12,7 +12,7 @@ from flask import Blueprint, jsonify, request
 
 import config
 from backend import tickets as ticket_store
-from backend import fortigate, wazuh, ai_proxy, shuffle
+from backend import fortigate, wazuh, ai_proxy, shuffle, jira
 
 spark_bp = Blueprint("spark", __name__)
 
@@ -756,6 +756,23 @@ def create_ticket():
     if not data or not data.get("title"):
         return jsonify({"error": "Campo 'title' obrigatório"}), 400
     ticket = ticket_store.create_ticket(data)
+    if (data or {}).get("syncJira"):
+        result = jira.create_issue(
+            config.JIRA_BASE_URL,
+            config.JIRA_EMAIL,
+            config.JIRA_API_TOKEN,
+            config.JIRA_PROJECT_KEY,
+            config.JIRA_DEFAULT_ISSUE_TYPE,
+            ticket,
+        )
+        ticket = ticket_store.mark_ticket_sync(
+            ticket["id"],
+            "jira",
+            result.get("key", ""),
+            result.get("url", ""),
+            "synced" if result.get("ok") else result.get("status", "failed"),
+            result.get("message", ""),
+        ) or ticket
     print(f"[TICKET] Criado: {ticket['id']} — {ticket['title'][:60]}")
     return jsonify(ticket), 201
 
@@ -776,6 +793,43 @@ def update_ticket(ticket_id):
         return jsonify({"error": "Ticket não encontrado"}), 404
     print(f"[TICKET] Atualizado: {ticket_id}")
     return jsonify(ticket)
+
+
+@spark_bp.route("/spark/jira/status")
+def jira_status():
+    return jsonify(
+        jira.status(
+            config.JIRA_BASE_URL,
+            config.JIRA_EMAIL,
+            config.JIRA_API_TOKEN,
+            config.JIRA_PROJECT_KEY,
+        )
+    )
+
+
+@spark_bp.route("/spark/tickets/<ticket_id>/jira", methods=["POST"])
+def sync_ticket_to_jira(ticket_id):
+    ticket = ticket_store.get_ticket(ticket_id)
+    if not ticket:
+        return jsonify({"error": "Ticket não encontrado"}), 404
+    result = jira.create_issue(
+        config.JIRA_BASE_URL,
+        config.JIRA_EMAIL,
+        config.JIRA_API_TOKEN,
+        config.JIRA_PROJECT_KEY,
+        config.JIRA_DEFAULT_ISSUE_TYPE,
+        ticket,
+    )
+    updated = ticket_store.mark_ticket_sync(
+        ticket_id,
+        "jira",
+        result.get("key", ""),
+        result.get("url", ""),
+        "synced" if result.get("ok") else result.get("status", "failed"),
+        result.get("message", ""),
+    )
+    status = 200 if result.get("ok") else 400
+    return jsonify({"ticket": updated or ticket, "jira": result}), status
 
 
 @spark_bp.route("/spark/tickets/<ticket_id>", methods=["DELETE"])

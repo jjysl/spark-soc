@@ -28,6 +28,12 @@ WAZUH_PASS = os.environ.get("WAZUH_PASS", "")
 SHUFFLE_BASE_URL = os.environ.get("SHUFFLE_BASE_URL", "http://localhost:3001")
 SHUFFLE_API_KEY = os.environ.get("SHUFFLE_API_KEY", "")
 
+JIRA_BASE_URL = os.environ.get("JIRA_BASE_URL", "")
+JIRA_EMAIL = os.environ.get("JIRA_EMAIL", "")
+JIRA_API_TOKEN = os.environ.get("JIRA_API_TOKEN", "")
+JIRA_PROJECT_KEY = os.environ.get("JIRA_PROJECT_KEY", "SPARK")
+JIRA_DEFAULT_ISSUE_TYPE = os.environ.get("JIRA_DEFAULT_ISSUE_TYPE", "Task")
+
 OLLAMA_BASE = os.environ.get("OLLAMA_BASE", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3")
 

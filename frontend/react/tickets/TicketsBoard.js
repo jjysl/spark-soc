@@ -30,6 +30,7 @@
       playbook: '',
       escalatedTo: '',
       escalationReason: '',
+      syncJira: false,
     };
   }
 
@@ -53,6 +54,7 @@
         ticket.incidentLink ? h('span', {className: 'jcard-inc'}, ticket.incidentLink) : null,
         ticket.ipBlocked ? h('span', {className: 'jcard-blocked'}, 'IP Blocked') : null,
         ticket.escalatedTo ? h('span', {className: 'jcard-escalated'}, 'Escalated') : null,
+        ticket.externalKey ? h('span', {className: 'jcard-inc'}, ticket.externalKey) : null,
         ticket.assignee ? h('div', {className: 'jcard-av', title: ticket.assignee}, ticket.assignee.split(' ').map(x => x[0]).join('').slice(0, 2).toUpperCase()) : null,
         h('span', {style: {fontSize: 10, color: 'var(--tm)', marginLeft: 'auto'}}, ticket.created || '')
       )
@@ -94,7 +96,7 @@
     );
   }
 
-  function TicketForm({value, onChange, onSubmit, onClose, onBlock, onEscalate, saving}) {
+  function TicketForm({value, onChange, onSubmit, onClose, onBlock, onEscalate, onSyncJira, jiraReady, saving}) {
     function update(field, next) {
       onChange({...value, [field]: next});
     }
@@ -119,7 +121,13 @@
           h('div', {className: 'jm-field'}, h('div', {className: 'jm-sidebar-label'}, 'Source IP'), h('input', {className: 'jm-input', value: value.ip || '', onChange: e => update('ip', e.target.value), placeholder: 'IP to investigate or block'})),
           h('div', {className: 'jm-field'}, h('div', {className: 'jm-sidebar-label'}, 'Escalate To'), h('input', {className: 'jm-input', value: value.escalatedTo || '', onChange: e => update('escalatedTo', e.target.value), placeholder: 'Team Lead / SOC Manager / CISO'})),
           h('div', {className: 'jm-field'}, h('div', {className: 'jm-sidebar-label'}, 'Escalation Reason'), h('textarea', {className: 'jm-textarea', value: value.escalationReason || '', onChange: e => update('escalationReason', e.target.value), placeholder: 'Reason for escalation'})),
+          !value.id ? h('label', {style: {display: 'flex', gap: 8, alignItems: 'center', fontSize: 11, color: 'var(--t2)'}},
+            h('input', {type: 'checkbox', checked: Boolean(value.syncJira), disabled: !jiraReady, onChange: e => update('syncJira', e.target.checked)}),
+            jiraReady ? 'Create Jira issue on save' : 'Jira not configured'
+          ) : null,
+          value.externalKey ? h('a', {href: value.externalUrl || '#', target: '_blank', rel: 'noreferrer', className: 'btn'}, `Open ${value.externalKey}`) : null,
           h('button', {className: 'jm-submit', disabled: saving || !value.title, onClick: onSubmit}, saving ? 'Saving...' : 'Save Ticket'),
+          value.id && !value.externalKey ? h('button', {className: 'btn btnj', disabled: !jiraReady, onClick: onSyncJira}, jiraReady ? 'Sync to Jira' : 'Jira Offline') : null,
           value.id && value.ip ? h('button', {className: 'btn', onClick: onBlock}, 'Block IP') : null,
           value.id && value.escalatedTo ? h('button', {className: 'btn', onClick: onEscalate}, 'Register Escalation') : null
         )
@@ -127,10 +135,33 @@
     );
   }
 
+  function JiraStatusCard({jira, onRefresh}) {
+    const configured = Boolean(jira?.configured);
+    const connected = Boolean(jira?.connected);
+    return h('div', {className: 'card', style: {marginBottom: 14}},
+      h('div', {className: 'ch'},
+        h('div', null,
+          h('div', {className: 'ct'}, 'Jira Integration'),
+          h('div', {className: 'cs'}, 'Server-side sync using Flask credentials, not browser tokens')
+        ),
+        h('span', {className: `badge ${connected ? 'blive' : configured ? 'bhigh' : 'binfo'}`}, connected ? 'Connected' : configured ? 'Configured' : 'Not configured')
+      ),
+      h('div', {className: 'cb', style: {display: 'grid', gridTemplateColumns: 'repeat(4,1fr) auto', gap: 10, alignItems: 'center'}},
+        h('div', {className: 'detail-cell'}, h('div', {className: 'detail-label'}, 'Project'), h('div', {className: 'detail-value'}, jira?.project || 'SPARK')),
+        h('div', {className: 'detail-cell'}, h('div', {className: 'detail-label'}, 'Account'), h('div', {className: 'detail-value'}, jira?.account || '--')),
+        h('div', {className: 'detail-cell'}, h('div', {className: 'detail-label'}, 'User API'), h('div', {className: 'detail-value'}, jira?.user_status || '--')),
+        h('div', {className: 'detail-cell'}, h('div', {className: 'detail-label'}, 'Project API'), h('div', {className: 'detail-value'}, jira?.project_status || '--')),
+        h('button', {className: 'btn', onClick: onRefresh}, 'Check')
+      ),
+      h('div', {style: {padding: '0 16px 14px', fontSize: 11, color: configured ? 'var(--t2)' : 'var(--amber)'}}, jira?.message || 'Configure JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN and JIRA_PROJECT_KEY.')
+    );
+  }
+
   function TicketsBoardApp() {
     const [tickets, setTickets] = useState([]);
     const [blockLog, setBlockLog] = useState([]);
     const [escalations, setEscalations] = useState([]);
+    const [jiraStatus, setJiraStatus] = useState({configured: false, connected: false});
     const [filters, setFilters] = useState({priority: '', type: '', assignee: ''});
     const [editing, setEditing] = useState(null);
     const [saving, setSaving] = useState(false);
@@ -138,14 +169,16 @@
     const [updatedAt, setUpdatedAt] = useState(null);
 
     async function load() {
-      const [ticketResp, blockResp, escResp] = await Promise.all([
+      const [ticketResp, blockResp, escResp, jiraResp] = await Promise.all([
         fetch('/spark/tickets', {credentials: 'include'}),
         fetch('/spark/ip-block-log', {credentials: 'include'}),
         fetch('/spark/escalation-log', {credentials: 'include'}),
+        fetch('/spark/jira/status', {credentials: 'include'}),
       ]);
       setTickets(ticketResp.ok ? await ticketResp.json() : []);
       setBlockLog(blockResp.ok ? await blockResp.json() : []);
       setEscalations(escResp.ok ? await escResp.json() : []);
+      setJiraStatus(jiraResp.ok ? await jiraResp.json() : {configured: false, connected: false, message: `HTTP ${jiraResp.status}`});
       setUpdatedAt(new Date());
     }
 
@@ -201,12 +234,28 @@
       await load();
     }
 
+    async function syncCurrentToJira() {
+      if (!editing?.id) return;
+      const response = await fetch(`/spark/tickets/${encodeURIComponent(editing.id)}/jira`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok) {
+        setEditing(payload.ticket || editing);
+        setMessage(`Jira issue ${payload.jira?.key || ''} created.`);
+      } else {
+        setMessage(`Jira sync failed: ${payload.jira?.message || payload.error || `HTTP ${response.status}`}`);
+      }
+      await load();
+    }
+
     const stats = useMemo(() => ({
       open: tickets.filter(t => t.status !== 'done').length,
       p1: tickets.filter(t => t.priority === 'p1' && t.status !== 'done').length,
       p2: tickets.filter(t => t.priority === 'p2' && t.status !== 'done').length,
       done: tickets.filter(t => t.status === 'done').length,
-      blocked: blockLog.filter(x => x.action === 'Bloqueado' && x.status === 'Ativo').length,
+      blocked: blockLog.filter(x => x.action === 'Blocked' && x.status === 'Active').length,
     }), [tickets, blockLog]);
 
     const assignees = [...new Set(tickets.map(t => t.assignee).filter(Boolean))];
@@ -224,7 +273,8 @@
         h(Kpi, {label: 'Active Blocks', value: stats.blocked, tone: 'blue'})
       ),
       h('div', {className: `aibox ${message ? '' : 'loading'}`}, h('strong', null, 'Tickets: '), message || 'No seeded demo tickets are loaded. Create or sync real SPARK case records.'),
-      editing ? h(TicketForm, {value: editing, onChange: setEditing, onSubmit: saveTicket, onClose: () => setEditing(null), onBlock: blockIp, onEscalate: escalate, saving}) : null,
+      h(JiraStatusCard, {jira: jiraStatus, onRefresh: load}),
+      editing ? h(TicketForm, {value: editing, onChange: setEditing, onSubmit: saveTicket, onClose: () => setEditing(null), onBlock: blockIp, onEscalate: escalate, onSyncJira: syncCurrentToJira, jiraReady: jiraStatus.connected, saving}) : null,
       h('div', {className: 'jira-topbar'},
         h('div', {className: 'jira-filters'},
           h('select', {className: 'jira-filter-sel', value: filters.priority, onChange: e => setFilters({...filters, priority: e.target.value})}, h('option', {value: ''}, 'All priorities'), PRIORITIES.map(([p, label]) => h('option', {value: p, key: p}, label))),
@@ -244,7 +294,7 @@
           columns: [
             {key: 'ip', label: 'IP', render: row => h('span', {className: 'mono'}, row.ip || '--')},
             {key: 'country', label: 'Country'},
-            {key: 'action', label: 'Action', render: row => h('span', {className: `badge ${row.action === 'Bloqueado' ? 'bcrit' : 'bok'}`}, row.action || '--')},
+            {key: 'action', label: 'Action', render: row => h('span', {className: `badge ${row.action === 'Blocked' ? 'bcrit' : 'bok'}`}, row.action || '--')},
             {key: 'reason', label: 'Reason'},
             {key: 'analyst', label: 'Analyst'},
             {key: 'time', label: 'Time', render: row => h('span', {className: 'mono'}, row.time || '--')},
