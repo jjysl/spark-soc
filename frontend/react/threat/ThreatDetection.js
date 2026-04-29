@@ -9,11 +9,18 @@
     'Credential Access', 'Discovery', 'Lateral Movement',
     'Command and Control', 'Exfiltration', 'Impact',
   ];
-  const MITRE_ROWS = [
-    ['P1', 'Critical'],
-    ['P2', 'High'],
-    ['P3', 'Medium'],
-    ['P4', 'Low'],
+  const MITRE_HEATMAP_COLUMNS = [
+    ['Recon', 'Reconnaissance'],
+    ['Resource Dev', 'Resource Development'],
+    ['Initial Access', 'Initial Access'],
+    ['Execution', 'Execution'],
+    ['Persistence', 'Persistence'],
+    ['Priv Esc', 'Privilege Escalation'],
+    ['Def. Evasion', 'Defense Evasion'],
+    ['Cred. Access', 'Credential Access'],
+    ['Discovery', 'Discovery'],
+    ['Lateral Move', 'Lateral Movement'],
+    ['Exfiltration', 'Exfiltration'],
   ];
 
   function fmtNum(value) {
@@ -48,9 +55,7 @@
 
   function shortTactic(value) {
     return String(value || 'Detection')
-      .replace('Command and Control', 'C2')
-      .replace('Lateral Movement', 'Lateral Move')
-      .replace('Credential Access', 'Credential Access');
+      .replace('Command and Control', 'Command & Control');
   }
 
   function TimeRange({value, onChange, disabled}) {
@@ -162,52 +167,42 @@
   }
 
   function MitreHeatmap({alerts, onFilter}) {
-    const matrix = new Map();
-    MITRE_ROWS.forEach(([priority]) => {
-      MITRE_TACTICS.forEach(tactic => matrix.set(`${priority}|${tactic}`, 0));
-    });
+    const rows = 4;
+    const matrix = Array.from({length: rows}, () => MITRE_HEATMAP_COLUMNS.map(() => 0));
     (alerts || []).forEach(alert => {
       const priority = alert.priority || 'P4';
-      const tactic = MITRE_TACTICS.includes(alert.mitre_tactic) ? alert.mitre_tactic : 'Impact';
-      const key = `${priority}|${tactic}`;
-      matrix.set(key, (matrix.get(key) || 0) + 1);
+      const row = Math.max(0, Math.min(rows - 1, Number(priority.replace('P', '')) - 1 || rows - 1));
+      const tactic = alert.mitre_tactic || '';
+      let col = MITRE_HEATMAP_COLUMNS.findIndex(([, full]) => full === tactic);
+      if (col === -1 && tactic === 'Command and Control') col = MITRE_HEATMAP_COLUMNS.findIndex(([, full]) => full === 'Exfiltration');
+      if (col === -1 && tactic === 'Impact') col = MITRE_HEATMAP_COLUMNS.findIndex(([, full]) => full === 'Defense Evasion');
+      if (col === -1) col = MITRE_HEATMAP_COLUMNS.findIndex(([, full]) => full === 'Discovery');
+      matrix[row][col] += 1;
     });
-    const max = Math.max(1, ...Array.from(matrix.values()));
+    const max = Math.max(1, ...matrix.flat());
     const colors = ['#f1f5f9', '#fee2e2', '#fca5a5', '#f87171', '#ef4444', '#b91c1c'];
-    const columns = '42px repeat(13,minmax(44px,1fr))';
     return h(React.Fragment, null,
-      h('div', {style: {fontSize: 11, color: 'var(--tm)', marginBottom: 10}}, 'Rows are SOC priority bands. Cells show real Wazuh alert counts by MITRE tactic. Click a cell to filter the feed.'),
-      h('div', {style: {overflowX: 'auto', paddingBottom: 2}},
-        h('div', {style: {minWidth: 760}},
-          h('div', {style: {display: 'grid', gridTemplateColumns: columns, gap: 2, marginBottom: 5}},
-            h('div', null),
-            MITRE_TACTICS.map(tactic => h('div', {
-              key: tactic,
-              title: tactic,
-              style: {fontSize: 8.5, fontWeight: 600, color: 'var(--tm)', textAlign: 'center', lineHeight: 1.15, paddingBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'},
-            }, tactic.replace('Resource Development', 'Resource').replace('Initial Access', 'Initial').replace('Privilege Escalation', 'Priv Esc').replace('Defense Evasion', 'Defense').replace('Credential Access', 'Credential').replace('Lateral Movement', 'Lateral').replace('Command and Control', 'C2')))
-          ),
-          h('div', {style: {display: 'grid', gridTemplateColumns: columns, gap: 2}},
-            MITRE_ROWS.flatMap(([priority, label]) => [
-              h('div', {key: `${priority}-label`, style: {fontSize: 10, color: 'var(--tm)', fontWeight: 700, display: 'flex', alignItems: 'center'}}, priority),
-              ...MITRE_TACTICS.map(tactic => {
-                const count = matrix.get(`${priority}|${tactic}`) || 0;
-                const idx = count ? Math.max(1, Math.min(5, Math.ceil((count / max) * 5))) : 0;
-                return h('div', {
-                  key: `${priority}-${tactic}`,
-                  title: `${label} / ${tactic}: ${count} alerts`,
-                  onClick: () => {
-                    if (count) {
-                      onFilter('priority', priority);
-                      onFilter('mitre.tactic', tactic);
-                    }
-                  },
-                  style: {height: 24, borderRadius: 3, background: colors[idx], cursor: count ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, color: idx >= 3 ? '#fff' : '#991b1b'},
-                }, count ? (count > 99 ? '99+' : count) : '');
-              }),
-            ])
-          )
-        )
+      h('div', {style: {display: 'grid', gridTemplateColumns: 'repeat(11,1fr)', gap: 2, marginBottom: 5}},
+        MITRE_HEATMAP_COLUMNS.map(([label, full]) => h('div', {
+          key: full,
+          title: full,
+          style: {fontSize: 8.5, fontWeight: 600, color: 'var(--tm)', textAlign: 'center', lineHeight: 1.2, paddingBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'},
+        }, label))
+      ),
+      h('div', {style: {display: 'grid', gridTemplateColumns: 'repeat(11,1fr)', gap: 2}},
+        matrix.flatMap((row, rowIndex) => row.map((count, colIndex) => {
+          const score = count ? Math.max(1, Math.min(5, Math.ceil((count / max) * 5))) : 0;
+          const [label, tactic] = MITRE_HEATMAP_COLUMNS[colIndex];
+          const color = colors[score];
+          return h('div', {
+            key: `${rowIndex}-${tactic}`,
+            title: `${label} - ${count} real alert${count === 1 ? '' : 's'}`,
+            onClick: () => count && onFilter('mitre.tactic', tactic),
+            onMouseOver: event => { event.currentTarget.style.opacity = '.7'; },
+            onMouseOut: event => { event.currentTarget.style.opacity = '1'; },
+            style: {aspectRatio: '1', borderRadius: 3, background: color, cursor: count ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 600, color: score >= 3 ? '#fff' : '#991b1b', transition: 'opacity .15s'},
+          }, score ? score : '');
+        }))
       ),
       h('div', {style: {display: 'flex', alignItems: 'center', gap: 6, marginTop: 10}},
         h('span', {style: {fontSize: 10, color: 'var(--tm)'}}, 'Low'),
@@ -271,7 +266,7 @@
     );
   }
 
-  function AlertFeed({alerts, total, filters, setFilters, search, setSearch, range, setRange}) {
+  function AlertFeed({alerts, total, filters, setFilters, search, range}) {
     const [openId, setOpenId] = useState('');
     const [detailTab, setDetailTab] = useState('summary');
     const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -301,37 +296,19 @@
       h('div', {className: 'ch'},
         h('div', null,
           h('div', {className: 'ct'}, 'Correlated Alert Feed'),
-          h('div', {className: 'cs'}, 'Wazuh Indexer - normalized analyst view - click values to filter')
+          h('div', {className: 'cs'}, 'Wazuh + FortiGate - AI-enriched - Fabric Monitoring')
         ),
         h('div', {style: {display: 'flex', alignItems: 'center', gap: 12}},
-          h('span', {className: 'ca'}, `${fmtNum(sortedAlerts.length)}/${fmtNum(total)} alerts`),
-          h('a', {href: '#', onClick: event => { event.preventDefault(); setRowsPerPage(50); setPage(1); }, style: {fontSize: 11, fontWeight: 600}}, 'View all')
+          h('a', {href: '#', onClick: event => { event.preventDefault(); setRowsPerPage(50); setPage(1); }, className: 'ca'}, 'View all')
         )
       ),
-      h('div', {className: 'wq-tools'},
-        h('input', {
-          className: 'wq-search',
-          value: search,
-          onChange: event => setSearch(event.target.value),
-          placeholder: 'Search rule, agent, IP, decoder, raw log',
-        }),
-        h(TimeRange, {value: range, onChange: setRange})
-      ),
-      h('div', {className: 'filter-tokens'},
-        filters.length ? filters.map((filter, idx) => h('span', {className: 'filter-token', key: `${filter.field}-${filter.value}`},
+      filters.length ? h('div', {className: 'filter-tokens'},
+        filters.map((filter, idx) => h('span', {className: 'filter-token', key: `${filter.field}-${filter.value}`},
           `${filter.field}:${filter.value}`,
           h('button', {onClick: () => setFilters(items => items.filter((_, index) => index !== idx))}, 'x')
-        )) : h('span', {style: {fontSize: 11, color: 'var(--tm)'}}, 'No active field filters')
-      ),
-      h('table', {className: 'ftable', style: {tableLayout: 'fixed'}},
-        h('colgroup', null,
-          h('col', {style: {width: 78}}),
-          h('col', null),
-          h('col', {style: {width: 106}}),
-          h('col', {style: {width: 104}}),
-          h('col', {style: {width: 82}}),
-          h('col', {style: {width: 74}})
-        ),
+        ))
+      ) : null,
+      h('table', {className: 'ftable'},
         h('thead', null, h('tr', null, ['Time', 'Description', 'Source IP', 'MITRE', 'Severity', 'Status'].map(col => h('th', {key: col}, col)))),
         h('tbody', null,
           visibleAlerts.length ? visibleAlerts.flatMap(alert => {
@@ -341,11 +318,10 @@
               h('tr', {key: id, onClick: () => setOpenId(isOpen ? '' : id)},
                 h('td', null, h('span', {className: 'mono', title: fmtDateTime(alert.timestamp)}, fmtTime(alert.timestamp))),
                 h('td', null,
-                  h('div', {className: 'edesc', title: alert.description, style: {maxWidth: 'none', whiteSpace: 'normal', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: 1.3}}, alert.description || 'Wazuh alert'),
-                  h('div', {style: {fontSize: 10, color: 'var(--tm)', marginTop: 2}}, `${alert.agent_name || 'unknown'} - Rule ${alert.rule_id || '-'} / level ${alert.level || 0}`)
+                  h('span', {className: 'edesc', title: `${alert.description || 'Wazuh alert'} - ${alert.agent_name || 'unknown'} - Rule ${alert.rule_id || '-'}`}, alert.description || 'Wazuh alert')
                 ),
                 h('td', null, h(FilterButton, {field: 'src_ip', value: alert.src_ip || alert.agent_ip, label: alert.src_ip || alert.agent_ip || '--', onFilter: addFilter})),
-                h('td', null, h(FilterButton, {field: 'mitre.tactic', value: alert.mitre_tactic, label: shortTactic(alert.mitre_tactic), onFilter: addFilter})),
+                h('td', null, h('span', {className: 'tpill', onClick: event => { event.stopPropagation(); addFilter('mitre.tactic', alert.mitre_tactic); }, style: {cursor: alert.mitre_tactic ? 'pointer' : 'default'}}, shortTactic(alert.mitre_tactic))),
                 h('td', null, h('span', {className: `badge ${alert.severity_class || 'binfo'}`}, alert.severity || 'Info')),
                 h('td', null, h('span', {className: `badge ${alert.status_class || 'bnew'}`}, alert.status || 'New'))
               ),
@@ -667,6 +643,7 @@
           h('div', {className: 'psub'}, h('span', {className: 'ldot'}), loading ? `Updating ${range} detections...` : 'Wazuh Indexer - normalized detections - live filters')
         ),
         h('div', {className: 'ha'},
+          h(TimeRange, {value: range, onChange: setRange}),
           h('button', {className: 'btn', onClick: () => setToolPanel(toolPanel === 'hunt' ? '' : 'hunt')}, 'Threat Hunting'),
           h('button', {className: 'btn btnp', onClick: () => setToolPanel(toolPanel === 'rule' ? '' : 'rule')}, 'New Triage Rule')
         )
@@ -693,8 +670,8 @@
           h('div', {className: 'cb'}, h(MitreHeatmap, {alerts: scopedAlerts, onFilter: addFilter}))
         )
       ),
-      h('div', {className: 'g11', style: {gridTemplateColumns: 'minmax(660px,1.45fr) minmax(360px,.85fr)', alignItems: 'start'}},
-        h(AlertFeed, {alerts: payload.alerts || [], total: payload.total || 0, filters, setFilters, search: searchInput, setSearch: setSearchInput, range, setRange}),
+      h('div', {className: 'g11'},
+        h(AlertFeed, {alerts: payload.alerts || [], total: payload.total || 0, filters, setFilters, search: searchInput, range}),
         h(ThreatIntelFeed, {data: payload})
       )
     );
