@@ -47,7 +47,10 @@
   }
 
   function shortTactic(value) {
-    return String(value || 'Detection').replace('Command and Control', 'Command & Control');
+    return String(value || 'Detection')
+      .replace('Command and Control', 'C2')
+      .replace('Lateral Movement', 'Lateral Move')
+      .replace('Credential Access', 'Credential Access');
   }
 
   function TimeRange({value, onChange, disabled}) {
@@ -171,34 +174,40 @@
     });
     const max = Math.max(1, ...Array.from(matrix.values()));
     const colors = ['#f1f5f9', '#fee2e2', '#fca5a5', '#f87171', '#ef4444', '#b91c1c'];
+    const columns = '42px repeat(13,minmax(44px,1fr))';
     return h(React.Fragment, null,
       h('div', {style: {fontSize: 11, color: 'var(--tm)', marginBottom: 10}}, 'Rows are SOC priority bands. Cells show real Wazuh alert counts by MITRE tactic. Click a cell to filter the feed.'),
-      h('div', {style: {display: 'grid', gridTemplateColumns: '54px repeat(13,1fr)', gap: 2, marginBottom: 5}},
-        h('div', null),
-        MITRE_TACTICS.map(tactic => h('div', {
-          key: tactic,
-          style: {fontSize: 8.5, fontWeight: 600, color: 'var(--tm)', textAlign: 'center', lineHeight: 1.2, paddingBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'},
-        }, tactic.replace('Resource Development', 'Resource Dev').replace('Privilege Escalation', 'Priv Esc').replace('Defense Evasion', 'Def. Evasion').replace('Command and Control', 'C2')))
-      ),
-      h('div', {style: {display: 'grid', gridTemplateColumns: '54px repeat(13,1fr)', gap: 2}},
-        MITRE_ROWS.flatMap(([priority, label]) => [
-          h('div', {key: `${priority}-label`, style: {fontSize: 10, color: 'var(--tm)', fontWeight: 700, display: 'flex', alignItems: 'center'}}, priority),
-          ...MITRE_TACTICS.map(tactic => {
-            const count = matrix.get(`${priority}|${tactic}`) || 0;
-            const idx = count ? Math.max(1, Math.min(5, Math.ceil((count / max) * 5))) : 0;
-            return h('div', {
-              key: `${priority}-${tactic}`,
-              title: `${label} / ${tactic}: ${count} alerts`,
-              onClick: () => {
-                if (count) {
-                  onFilter('priority', priority);
-                  onFilter('mitre.tactic', tactic);
-                }
-              },
-              style: {height: 24, borderRadius: 3, background: colors[idx], cursor: count ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, color: idx >= 3 ? '#fff' : '#991b1b'},
-            }, count ? (count > 99 ? '99+' : count) : '');
-          }),
-        ])
+      h('div', {style: {overflowX: 'auto', paddingBottom: 2}},
+        h('div', {style: {minWidth: 760}},
+          h('div', {style: {display: 'grid', gridTemplateColumns: columns, gap: 2, marginBottom: 5}},
+            h('div', null),
+            MITRE_TACTICS.map(tactic => h('div', {
+              key: tactic,
+              title: tactic,
+              style: {fontSize: 8.5, fontWeight: 600, color: 'var(--tm)', textAlign: 'center', lineHeight: 1.15, paddingBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'},
+            }, tactic.replace('Resource Development', 'Resource').replace('Initial Access', 'Initial').replace('Privilege Escalation', 'Priv Esc').replace('Defense Evasion', 'Defense').replace('Credential Access', 'Credential').replace('Lateral Movement', 'Lateral').replace('Command and Control', 'C2')))
+          ),
+          h('div', {style: {display: 'grid', gridTemplateColumns: columns, gap: 2}},
+            MITRE_ROWS.flatMap(([priority, label]) => [
+              h('div', {key: `${priority}-label`, style: {fontSize: 10, color: 'var(--tm)', fontWeight: 700, display: 'flex', alignItems: 'center'}}, priority),
+              ...MITRE_TACTICS.map(tactic => {
+                const count = matrix.get(`${priority}|${tactic}`) || 0;
+                const idx = count ? Math.max(1, Math.min(5, Math.ceil((count / max) * 5))) : 0;
+                return h('div', {
+                  key: `${priority}-${tactic}`,
+                  title: `${label} / ${tactic}: ${count} alerts`,
+                  onClick: () => {
+                    if (count) {
+                      onFilter('priority', priority);
+                      onFilter('mitre.tactic', tactic);
+                    }
+                  },
+                  style: {height: 24, borderRadius: 3, background: colors[idx], cursor: count ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, color: idx >= 3 ? '#fff' : '#991b1b'},
+                }, count ? (count > 99 ? '99+' : count) : '');
+              }),
+            ])
+          )
+        )
       ),
       h('div', {style: {display: 'flex', alignItems: 'center', gap: 6, marginTop: 10}},
         h('span', {style: {fontSize: 10, color: 'var(--tm)'}}, 'Low'),
@@ -314,7 +323,15 @@
           h('button', {onClick: () => setFilters(items => items.filter((_, index) => index !== idx))}, 'x')
         )) : h('span', {style: {fontSize: 11, color: 'var(--tm)'}}, 'No active field filters')
       ),
-      h('table', {className: 'ftable'},
+      h('table', {className: 'ftable', style: {tableLayout: 'fixed'}},
+        h('colgroup', null,
+          h('col', {style: {width: 78}}),
+          h('col', null),
+          h('col', {style: {width: 106}}),
+          h('col', {style: {width: 104}}),
+          h('col', {style: {width: 82}}),
+          h('col', {style: {width: 74}})
+        ),
         h('thead', null, h('tr', null, ['Time', 'Description', 'Source IP', 'MITRE', 'Severity', 'Status'].map(col => h('th', {key: col}, col)))),
         h('tbody', null,
           visibleAlerts.length ? visibleAlerts.flatMap(alert => {
@@ -324,7 +341,7 @@
               h('tr', {key: id, onClick: () => setOpenId(isOpen ? '' : id)},
                 h('td', null, h('span', {className: 'mono', title: fmtDateTime(alert.timestamp)}, fmtTime(alert.timestamp))),
                 h('td', null,
-                  h('div', {className: 'edesc', title: alert.description}, alert.description || 'Wazuh alert'),
+                  h('div', {className: 'edesc', title: alert.description, style: {maxWidth: 'none', whiteSpace: 'normal', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: 1.3}}, alert.description || 'Wazuh alert'),
                   h('div', {style: {fontSize: 10, color: 'var(--tm)', marginTop: 2}}, `${alert.agent_name || 'unknown'} - Rule ${alert.rule_id || '-'} / level ${alert.level || 0}`)
                 ),
                 h('td', null, h(FilterButton, {field: 'src_ip', value: alert.src_ip || alert.agent_ip, label: alert.src_ip || alert.agent_ip || '--', onFilter: addFilter})),
@@ -660,7 +677,7 @@
         h('strong', null, 'SPARK Threat Triage: '),
         error ? `${payload.triage} Keeping the page free of fallback mock data.` : payload.triage
       ),
-      h('div', {className: 'g12'},
+      h('div', {className: 'g12', style: {alignItems: 'start'}},
         h('div', {className: 'card'},
           h('div', {className: 'ch'},
             h('div', null, h('div', {className: 'ct'}, 'Active Alert Summary'), h('div', {className: 'cs'}, 'Kill Chain - active incident correlation')),
@@ -676,7 +693,7 @@
           h('div', {className: 'cb'}, h(MitreHeatmap, {alerts: scopedAlerts, onFilter: addFilter}))
         )
       ),
-      h('div', {className: 'g11'},
+      h('div', {className: 'g11', style: {gridTemplateColumns: 'minmax(660px,1.45fr) minmax(360px,.85fr)', alignItems: 'start'}},
         h(AlertFeed, {alerts: payload.alerts || [], total: payload.total || 0, filters, setFilters, search: searchInput, setSearch: setSearchInput, range, setRange}),
         h(ThreatIntelFeed, {data: payload})
       )
