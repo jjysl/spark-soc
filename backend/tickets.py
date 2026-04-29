@@ -478,7 +478,14 @@ def promote_alerts_to_cases(alerts: list[dict], sla_policy: dict[str, int]) -> l
         level = int(alert.get("level") or 0)
         priority = _priority_from_level(level)
         sla_minutes = int(sla_policy.get(priority, 360))
-        source_alert_id = alert.get("document_id") or f"{alert.get('rule_id', '')}:{alert.get('timestamp', '')}"
+        source_alert_id = alert.get("document_id") or ":".join([
+            str(alert.get("rule_id", "")),
+            str(alert.get("timestamp", "")),
+            str(alert.get("agent_id", "")),
+            str(alert.get("agent_name", "")),
+            str(alert.get("src_ip", "")),
+            str(alert.get("description", ""))[:120],
+        ])
         rule_groups = ", ".join(alert.get("groups") or []) if isinstance(alert.get("groups"), list) else str(alert.get("groups") or "")
         raw_json = json.dumps(alert.get("raw") or alert, ensure_ascii=False, sort_keys=True)
         existing = conn.execute(
@@ -576,17 +583,27 @@ def promote_alerts_to_cases(alerts: list[dict], sla_policy: dict[str, int]) -> l
     return cases
 
 
-def list_incident_cases(limit: int = 25, include_closed: bool = False) -> list[dict]:
+def list_incident_cases(limit: int = 25, include_closed: bool = False, sort: str = "recent") -> list[dict]:
     init_case_store()
     where = "" if include_closed else "WHERE status != 'closed'"
+    if sort == "sla":
+        order_by = """
+        ORDER BY
+          CASE priority WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 WHEN 'P3' THEN 3 ELSE 4 END,
+          due_at ASC
+        """
+    else:
+        order_by = """
+        ORDER BY
+          COALESCE(NULLIF(alert_timestamp, ''), created_at) DESC,
+          id DESC
+        """
     conn = _db()
     rows = conn.execute(
         f"""
         SELECT * FROM incident_cases
         {where}
-        ORDER BY
-          CASE priority WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 WHEN 'P3' THEN 3 ELSE 4 END,
-          due_at ASC
+        {order_by}
         LIMIT ?
         """,
         (limit,),

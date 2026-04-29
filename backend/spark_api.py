@@ -112,14 +112,16 @@ def _build_workqueue(cases: list[dict]) -> tuple[list[dict], dict]:
         sla_class = "slbr" if sla_state == "breached" else "slwarn" if sla_state == "at_risk" else "slok"
         fill_class = "fbr" if sla_state == "breached" else "fwarn" if sla_state == "at_risk" else "fok"
 
+        alert_timestamp = case.get("alert_timestamp") or case.get("created_at", "")
+
         workqueue.append({
             "id": case.get("case_id") or f"SPARK-INC-{idx:04d}",
             "caseId": case.get("case_id", ""),
             "documentId": case.get("source_alert_id", ""),
             "index": case.get("source_index", ""),
-            "time": (case.get("created_at") or "")[11:16] or "--:--",
+            "time": alert_timestamp[11:16] or "--:--",
             "timestamp": case.get("created_at", ""),
-            "alertTimestamp": case.get("alert_timestamp", ""),
+            "alertTimestamp": alert_timestamp,
             "description": case.get("title") or "Wazuh alert",
             "level": case.get("rule_level", ""),
             "groups": [item.strip() for item in (case.get("rule_groups") or "").split(",") if item.strip()],
@@ -795,7 +797,7 @@ def executive_overview():
 
     alerts = alert_data.get("alerts", [])
     promoted_cases = ticket_store.promote_alerts_to_cases(alerts, SLA_POLICY_MINUTES) if alerts else []
-    case_records = ticket_store.list_incident_cases(limit=100)
+    case_records = ticket_store.list_incident_cases(limit=100, sort="recent")
     lifecycle_metrics = ticket_store.get_incident_lifecycle_metrics()
     workqueue, sla_summary = _build_workqueue(case_records)
     posture = _build_posture(alert_data, agents, fortigate_data, shuffle_data, sla_summary)
@@ -961,7 +963,8 @@ def delete_ticket(ticket_id):
 def list_incident_cases():
     include_closed = request.args.get("include_closed") == "1"
     limit = request.args.get("limit", 25, type=int)
-    return jsonify(ticket_store.list_incident_cases(limit=limit, include_closed=include_closed))
+    sort = request.args.get("sort", "recent")
+    return jsonify(ticket_store.list_incident_cases(limit=limit, include_closed=include_closed, sort=sort))
 
 
 @spark_bp.route("/spark/incident-cases", methods=["POST"])
