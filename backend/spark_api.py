@@ -396,6 +396,7 @@ def network_endpoint():
     }
     blocked = ticket_store.get_blocked_ips()
     correlations = _build_fortigate_correlations(alert_data.get("alerts", []), fortigate_data)
+
     return jsonify({
         "source": "live" if not errors else "partial",
         "errors": errors,
@@ -485,6 +486,9 @@ def incident_response():
             "status": "Candidate",
         })
 
+    case_records = ticket_store.list_incident_cases(limit=25, include_closed=False)
+    action_events = ticket_store.list_action_events(limit=20)
+
     return jsonify({
         "source": "live" if not errors else "partial",
         "range": time_range,
@@ -497,12 +501,13 @@ def incident_response():
             "candidates": candidates,
         },
         "playbooks": [],
-        "timeline": [],
-        "actions": [],
+        "cases": case_records,
+        "timeline": action_events,
+        "actions": action_events,
         "notes": {
-            "playbooks": "Shuffle workflow listing/execution endpoints still need lab validation.",
-            "timeline": "Incident lifecycle timestamps are not persisted yet.",
-            "actions": "FortiGate/SOAR action execution logs are not persisted yet.",
+            "playbooks": "Shuffle webhook dispatch is enabled after FortiGate block actions.",
+            "timeline": "Case lifecycle actions are persisted as SPARK action events.",
+            "actions": "FortiGate and Shuffle response evidence is persisted when actions execute.",
         },
     })
 
@@ -849,6 +854,63 @@ def list_incident_cases():
     return jsonify(ticket_store.list_incident_cases(limit=limit, include_closed=include_closed))
 
 
+@spark_bp.route("/spark/incident-cases", methods=["POST"])
+def create_incident_case():
+    data = request.get_json() or {}
+    title = data.get("title") or data.get("description") or "Wazuh alert"
+    if not title:
+        return jsonify({"error": "Case title is required"}), 400
+
+    level = int(data.get("level") or 0)
+    if not level:
+        level = {"P1": 12, "P2": 7, "P3": 4, "P4": 1}.get(data.get("priority", "P3"), 4)
+    alert = {
+        "document_id": data.get("document_id") or data.get("source_alert_id") or f"manual:{title}:{data.get('timestamp', '')}",
+        "index": data.get("index", "spark-manual"),
+        "timestamp": data.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+        "description": title,
+        "priority": data.get("priority") or _priority_from_level(level),
+        "level": level,
+        "severity": data.get("severity", ""),
+        "agent_name": data.get("agent_name", "unknown"),
+        "agent_id": data.get("agent_id", ""),
+        "agent_ip": data.get("agent_ip", ""),
+        "manager_name": data.get("manager_name", ""),
+        "decoder_name": data.get("decoder_name", ""),
+        "location": data.get("location", ""),
+        "src_ip": data.get("src_ip", ""),
+        "dst_ip": data.get("dst_ip", ""),
+        "src_port": data.get("src_port", ""),
+        "dst_port": data.get("dst_port", ""),
+        "mitre_tactic": data.get("mitre_tactic") or "Detection",
+        "mitre_technique": data.get("mitre_technique", ""),
+        "rule_id": data.get("rule_id", "manual"),
+        "groups": data.get("groups", []),
+        "full_log": data.get("full_log") or data.get("raw_summary") or "",
+        "raw": data.get("raw") or data,
+    }
+    cases = ticket_store.promote_alerts_to_cases([alert], SLA_POLICY_MINUTES)
+    case = cases[0] if cases else None
+    if not case:
+        return jsonify({"error": "Case could not be created"}), 500
+
+    action = ticket_store.record_action_event(
+        case_id=case.get("case_id", ""),
+        action="create_case",
+        status="success",
+        payload={
+            "action": "create_case",
+            "message": "Incident case created from detection candidate.",
+            "case_id": case.get("case_id", ""),
+            "ip": case.get("src_ip", ""),
+            "priority": case.get("priority", ""),
+            "title": case.get("title", ""),
+        },
+    )
+    _executive_cache.clear()
+    return jsonify({"case": case, "action": action}), 201
+
+
 @spark_bp.route("/spark/incident-cases/<case_id>", methods=["PUT"])
 def update_incident_case(case_id):
     case = ticket_store.update_incident_case(case_id, request.get_json() or {})
@@ -858,9 +920,64 @@ def update_incident_case(case_id):
     return jsonify(case)
 
 
+@spark_bp.route("/spark/incident-cases/<case_id>/action", methods=["POST"])
+def incident_case_action(case_id):
+    data = request.get_json() or {}
+    requested = (data.get("action") or "").strip()
+    analyst = data.get("analyst") or "SOC"
+    case = ticket_store.get_incident_case(case_id)
+    if not case:
+        return jsonify({"error": "Incident case not found"}), 404
+
+    updates = {}
+    action_name = requested
+    message = ""
+    status = "success"
+    if requested == "assign":
+        updates = {"owner": analyst}
+        action_name = "assign_to_me"
+        message = f"Case assigned to {analyst}."
+    elif requested == "start":
+        updates = {"status": "investigating", "owner": analyst if case.get("owner") == "Unassigned" else case.get("owner")}
+        action_name = "start_investigation"
+        message = "Investigation started and case acknowledged."
+    elif requested == "escalate":
+        to = data.get("to") or "SOC Manager"
+        reason = data.get("reason") or "Escalation requested by analyst."
+        action_name = "escalate_case"
+        message = f"Case escalated to {to}: {reason}"
+    elif requested == "close":
+        updates = {"status": "closed"}
+        action_name = "close_case"
+        message = data.get("message") or "Case closed after analyst review."
+    else:
+        return jsonify({"error": "Unsupported case action"}), 400
+
+    updated_case = ticket_store.update_incident_case(case_id, updates) if updates else case
+    payload = {
+        "action": action_name,
+        "status": status,
+        "message": message,
+        "case_id": case_id,
+        "analyst": analyst,
+        "ip": case.get("src_ip", ""),
+        "priority": case.get("priority", ""),
+        "to": data.get("to", ""),
+        "reason": data.get("reason", ""),
+    }
+    event = ticket_store.record_action_event(
+        case_id=case_id,
+        action=action_name,
+        status=status,
+        payload=payload,
+    )
+    _executive_cache.clear()
+    return jsonify({"case": updated_case, "action": event, "message": message})
+
+
 @spark_bp.route("/spark/block-ip", methods=["POST"])
 def block_ip():
-    data    = request.get_json()
+    data    = request.get_json() or {}
     ip      = (data.get("ip") or "").strip()
     if not ip:
         return jsonify({"error": "IP não fornecido"}), 400
@@ -868,13 +985,107 @@ def block_ip():
     country  = data.get("country", "")
     reason   = data.get("reason", "")
     analyst  = data.get("analyst", "SOC")
-
-    entry     = ticket_store.block_ip(ip, country, reason, analyst)
-    fg_result = fortigate.create_address_object(
-        config.FORTIGATE_BASE_URL, config.FORTIGATE_API_KEY, ip
+    case_id  = data.get("case_id", "") or data.get("caseId", "")
+    ticket_id = data.get("ticket_id", "") or data.get("ticketId", "")
+    group_name = getattr(config, "FORTIGATE_BLOCKLIST_GROUP", "SPARK_BLOCKLIST")
+    policy_name = getattr(config, "FORTIGATE_BLOCKLIST_POLICY", "SPARK_BLOCKLIST_DENY")
+    fg_result = fortigate.add_ip_to_blocklist(
+        config.FORTIGATE_BASE_URL,
+        config.FORTIGATE_API_KEY,
+        ip,
+        group_name,
+        policy_name,
     )
-    print(f"[SPARK] IP bloqueado: {ip} — FortiGate: {fg_result}")
-    return jsonify({"message": f"IP {ip} bloqueado com sucesso", "entry": entry, "fortigate": fg_result})
+    if fg_result.get("ok"):
+        entry = ticket_store.block_ip(ip, country, reason, analyst)
+        entry["fortigate"] = fg_result
+    else:
+        entry = {
+            "ip": ip,
+            "country": country,
+            "reason": reason,
+            "analyst": analyst,
+            "status": "Failed",
+            "fortigate": fg_result,
+        }
+
+    evidence_payload = {
+        **fg_result,
+        "action": "fortigate_block_ip",
+        "analyst": analyst,
+        "reason": reason,
+        "case_id": case_id,
+        "ticket_id": ticket_id,
+    }
+    action_event = ticket_store.record_action_event(
+        case_id=case_id,
+        ticket_id=ticket_id,
+        action="fortigate_block_ip",
+        status="success" if fg_result.get("ok") else "failure",
+        payload=evidence_payload,
+    )
+    workflow = getattr(config, "SHUFFLE_INCIDENT_WORKFLOW", "SPARK - Incident Response Evidence")
+    shuffle_result = {
+        "ok": False,
+        "webhook_called": False,
+        "status": "skipped",
+        "workflow": workflow,
+        "message": "Shuffle dispatch skipped because the FortiGate action did not succeed.",
+    }
+    shuffle_event = None
+    if fg_result.get("ok"):
+        shuffle_payload = {
+            "success": True,
+            "source": "SPARK SOC",
+            "workflow": workflow,
+            "message": "Incident response evidence registered in Shuffle.",
+            "playbook_type": "Block an IP",
+            "case_id": case_id,
+            "ticket_id": ticket_id,
+            "title": data.get("title") or reason or "FortiGate blocklist response",
+            "priority": data.get("priority", ""),
+            "src_ip": ip,
+            "analyst": analyst,
+            "action": "fortigate_block_ip",
+            "fortigate_object": fg_result.get("object", ""),
+            "fortigate_group": fg_result.get("group", group_name),
+            "fortigate_policy": fg_result.get("policy", policy_name),
+            "enforcement_path": fg_result.get("enforcement_path", "pending network routing validation"),
+        }
+        shuffle_result = shuffle.dispatch_incident_evidence(
+            getattr(config, "SHUFFLE_INCIDENT_WEBHOOK_URL", ""),
+            workflow,
+            shuffle_payload,
+        )
+        shuffle_event = ticket_store.record_action_event(
+            case_id=case_id,
+            ticket_id=ticket_id,
+            action="shuffle_playbook_dispatch",
+            status="success" if shuffle_result.get("ok") else "failure",
+            payload={
+                "action": "shuffle_playbook_dispatch",
+                "status": "success" if shuffle_result.get("ok") else "failure",
+                "ip": ip,
+                "message": shuffle_result.get("message", ""),
+                "shuffle_webhook_called": shuffle_result.get("webhook_called", False),
+                "shuffle_status_code": shuffle_result.get("status_code"),
+                "shuffle_workflow": shuffle_result.get("workflow", ""),
+                "shuffle_message": shuffle_result.get("message", ""),
+                "sent_payload": shuffle_payload,
+                "error": shuffle_result.get("error", ""),
+                "enforcement_path": fg_result.get("enforcement_path", "pending network routing validation"),
+            },
+        )
+    status = 200 if fg_result.get("ok") else 400
+    print(f"[SPARK] FortiGate blocklist action for {ip}: {fg_result.get('status')}")
+    return jsonify({
+        "message": fg_result.get("message") or "FortiGate blocklist action failed.",
+        "entry": entry,
+        "fortigate": fg_result,
+        "shuffle": shuffle_result,
+        "action": action_event,
+        "shuffle_action": shuffle_event,
+    }), status
 
 
 @spark_bp.route("/spark/unblock-ip", methods=["POST"])
@@ -900,6 +1111,14 @@ def blocked_ips():
 @spark_bp.route("/spark/ip-block-log")
 def ip_block_log():
     return jsonify(ticket_store.get_ip_block_log())
+
+
+@spark_bp.route("/spark/action-events")
+def action_events():
+    limit = request.args.get("limit", 25, type=int)
+    case_id = request.args.get("case_id", "")
+    ticket_id = request.args.get("ticket_id", "")
+    return jsonify(ticket_store.list_action_events(limit=limit, case_id=case_id, ticket_id=ticket_id))
 
 
 # ── Escalação ──────────────────────────────────────────────────────────────

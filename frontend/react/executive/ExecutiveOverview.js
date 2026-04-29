@@ -194,19 +194,24 @@
     }
 
     function renderDetails(item) {
-      function updateCase(patch) {
+      function runCaseAction(action) {
         if (!item.caseId) return;
-        setActionState(`Updating ${item.caseId}...`);
-        fetch(`/spark/incident-cases/${encodeURIComponent(item.caseId)}`, {
-          method: 'PUT',
+        setActionState(`${action} ${item.caseId}...`);
+        fetch(`/spark/incident-cases/${encodeURIComponent(item.caseId)}/action`, {
+          method: 'POST',
           headers: {'Content-Type': 'application/json'},
           credentials: 'include',
-          body: JSON.stringify(patch),
+          body: JSON.stringify({
+            action,
+            analyst: currentOwnerName(),
+            to: 'SOC Manager',
+            reason: `${item.priority || 'P3'} case selected from Executive Overview`,
+          }),
         }).then(response => {
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           return response.json();
-        }).then(updated => {
-          setActionState(`${updated.case_id || item.caseId} updated`);
+        }).then(payload => {
+          setActionState(payload.message || `${item.caseId} updated`);
           onCaseUpdate && onCaseUpdate();
         }).catch(error => {
           setActionState(`Update failed: ${error.message}`);
@@ -214,10 +219,10 @@
         });
       }
       const actions = h('div', {style: {display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12}},
-        h('button', {className: 'btn', onClick: event => { event.stopPropagation(); updateCase({status: 'investigating'}); }}, 'Start Investigation'),
-        h('button', {className: 'btn', onClick: event => { event.stopPropagation(); updateCase({owner: currentOwnerName()}); }}, 'Assign to Me'),
+        h('button', {className: 'btn', onClick: event => { event.stopPropagation(); runCaseAction('start'); }}, 'Start Investigation'),
+        h('button', {className: 'btn', onClick: event => { event.stopPropagation(); runCaseAction('assign'); }}, 'Assign to Me'),
         h('button', {className: 'btn', onClick: event => { event.stopPropagation(); onServiceRequest && onServiceRequest(item); }}, 'Create Service Request'),
-        h('button', {className: 'btn btnp', onClick: event => { event.stopPropagation(); updateCase({status: 'closed'}); }}, 'Close Case'),
+        h('button', {className: 'btn btnp', onClick: event => { event.stopPropagation(); runCaseAction('close'); }}, 'Close Case'),
         actionState ? h('span', {style: {fontSize: 11, color: 'var(--tm)'}}, actionState) : null
       );
       if (detailTab === 'json') {
@@ -291,64 +296,54 @@
         ),
         h('button', {className: 'detail-filter', onClick: () => setFieldFilters([])}, 'Clear filters')
       ) : null,
-      h('table', {className: 'ftable'},
-        h('thead', null,
-          h('tr', null,
-            ['Incident ID', 'Time', 'Description', 'MITRE Tactic', 'Priority', 'Analyst', 'SLA Remaining', 'Status']
-              .map(col => h('th', {key: col}, col))
-          )
-        ),
-        h('tbody', null,
-          visibleItems.length ? visibleItems.flatMap(item => {
-            const rowKey = `${item.id}-${item.documentId || item.time}`;
-            const isOpen = openId === rowKey;
-            return [
-              h('tr', {key: rowKey, onClick: () => setOpenId(isOpen ? null : rowKey)},
-                h('td', null, h('span', {className: 'mono'}, item.id || 'WAZUH')),
-                h('td', null, h('span', {className: 'mono', title: fmtDateTime(item.alertTimestamp || item.timestamp)}, fmtTime(item.alertTimestamp || item.timestamp))),
-                h('td', null, h('span', {className: 'edesc', title: item.description}, item.description || 'Wazuh alert')),
-                h('td', null, h('span', {className: 'tpill'}, item.tactic || 'Detection')),
-                h('td', null, h('span', {className: `badge ${item.badge || clsPriority(item.priority)}`}, item.priority || 'P3')),
-                h('td', {style: {fontSize: 12, color: 'var(--t2)'}}, item.analyst || 'Unassigned'),
-                h('td', null,
-                  h('div', {className: 'slaw'},
-                    h('span', {className: `slat ${item.slaClass || 'slok'}`}, item.sla || '-'),
-                    h('div', {className: 'slbar'},
-                      h('div', {className: `slbf ${item.fillClass || 'fok'}`, style: {width: `${item.slaPct || 0}%`}})
-                    )
-                  )
+      visibleItems.length ? h('div', {className: 'exec-case-list'},
+        visibleItems.map(item => {
+          const rowKey = `${item.id}-${item.documentId || item.time}`;
+          const isOpen = openId === rowKey;
+          return h('div', {className: `exec-case ${isOpen ? 'open' : ''}`, key: rowKey},
+            h('button', {className: 'exec-case-summary', onClick: () => setOpenId(isOpen ? null : rowKey)},
+              h('div', {className: 'exec-case-main'},
+                h('div', {className: 'exec-case-title'},
+                  h('span', {className: `badge ${item.badge || clsPriority(item.priority)}`}, item.priority || 'P3'),
+                  h('span', {className: 'mono'}, item.id || 'WAZUH'),
+                  h('span', {className: 'exec-desc'}, item.description || 'Wazuh alert')
                 ),
-                h('td', null, h('span', {className: `badge ${item.statusBadge || 'bnew'}`}, item.status || 'New'))
+                h('div', {className: 'exec-case-meta'},
+                  h('span', null, fmtTime(item.alertTimestamp || item.timestamp)),
+                  h('span', null, item.tactic || 'Detection'),
+                  h('span', null, item.analyst || 'Unassigned'),
+                  h('span', {className: `badge ${item.statusBadge || 'bnew'}`}, item.status || 'New')
+                )
               ),
-              isOpen && h('tr', {key: `${rowKey}-detail`, className: 'detail-row'},
-                h('td', {colSpan: 8},
-                  h('div', null,
-                    h('div', {className: 'detail-tabs'},
-                      [
-                        ['table', 'Evidence'],
-                        ['rule', 'Rule'],
-                        ['json', 'Raw JSON'],
-                      ].map(([tab, label]) =>
-                        h('button', {
-                          key: tab,
-                          className: detailTab === tab ? 'active' : '',
-                          onClick: event => {
-                            event.stopPropagation();
-                            setDetailTab(tab);
-                          },
-                        }, label)
-                      )
-                    ),
-                    renderDetails(item)
-                  )
+              h('div', {className: 'exec-case-sla'},
+                h('span', {className: `slat ${item.slaClass || 'slok'}`}, item.sla || '-'),
+                h('div', {className: 'slbar'},
+                  h('div', {className: `slbf ${item.fillClass || 'fok'}`, style: {width: `${item.slaPct || 0}%`}})
                 )
               )
-            ].filter(Boolean);
-          }) : h('tr', null,
-            h('td', {colSpan: 8, style: {color: 'var(--tm)', textAlign: 'center'}}, 'No alerts match the selected filters')
-          )
-        )
-      ),
+            ),
+            isOpen ? h('div', {className: 'exec-case-detail'},
+              h('div', {className: 'detail-tabs'},
+                [
+                  ['table', 'Evidence'],
+                  ['rule', 'Rule'],
+                  ['json', 'Raw JSON'],
+                ].map(([tab, label]) =>
+                  h('button', {
+                    key: tab,
+                    className: detailTab === tab ? 'active' : '',
+                    onClick: event => {
+                      event.stopPropagation();
+                      setDetailTab(tab);
+                    },
+                  }, label)
+                )
+              ),
+              renderDetails(item)
+            ) : null
+          );
+        })
+      ) : h('div', {className: 'cb', style: {color: 'var(--tm)', textAlign: 'center'}}, 'No alerts match the selected filters'),
       h('div', {style: {display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderTop: '1px solid var(--border)'}},
         h('div', {style: {display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--tm)'}},
           h('span', null, 'Rows per page:'),
@@ -548,11 +543,11 @@
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const ticket = await response.json();
-        setMessage(`Service request ${ticket.id} created. Opening Incident Tickets.`);
+        setMessage(`Service request ${ticket.id} created. Opening Cases & Response.`);
         window.dispatchEvent(new CustomEvent('spark:tickets-refresh'));
         setTimeout(() => {
           const buttons = Array.from(document.querySelectorAll('.tbtn'));
-          const ticketsButton = buttons.find(button => button.textContent.includes('Incident Tickets'));
+          const ticketsButton = buttons.find(button => button.textContent.includes('Cases & Response'));
           if (ticketsButton) ticketsButton.click();
         }, 300);
       } catch (error) {

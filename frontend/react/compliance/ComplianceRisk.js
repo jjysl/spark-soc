@@ -77,21 +77,22 @@
         ),
         h('span', {className: 'ca'}, `${fmtNum(items.length)} shown`)
       ),
-      items.length ? h('table', {className: 'ftable'},
-        h('thead', null, h('tr', null, ['Detected', 'Module', 'Finding', 'Agent', 'Level', 'Rule'].map(col => h('th', {key: col}, col)))),
-        h('tbody', null,
-          items.map(item => {
-            const groups = Array.isArray(item.groups) ? item.groups.join(', ') : '';
-            return h('tr', {key: item.document_id || `${item.rule_id}-${item.timestamp}`},
-              h('td', null, h('span', {className: 'mono'}, fmtTime(item.timestamp))),
-              h('td', null, h('span', {className: 'tpill'}, groups || 'wazuh')),
-              h('td', null, h('span', {className: 'edesc', title: item.description}, item.description || 'Wazuh finding')),
-              h('td', null, h('span', {className: 'mono'}, item.agent_name || 'unknown')),
-              h('td', null, h('span', {className: `badge ${item.severity_class || 'binfo'}`}, item.level || 0)),
-              h('td', null, h('span', {className: 'mono'}, item.rule_id || '--'))
-            );
-          })
-        )
+      items.length ? h('div', {className: 'compact-list'},
+        items.map(item => {
+          const groups = Array.isArray(item.groups) ? item.groups.slice(0, 3).join(', ') : '';
+          return h('div', {className: 'compact-row', key: item.document_id || `${item.rule_id}-${item.timestamp}`},
+            h('div', {className: 'compact-main'},
+              h('div', {className: 'compact-title', title: item.description}, item.description || 'Wazuh finding'),
+              h('div', {className: 'compact-meta'},
+                h('span', {className: 'mono'}, fmtTime(item.timestamp)),
+                h('span', {className: 'tpill compact-pill', title: Array.isArray(item.groups) ? item.groups.join(', ') : ''}, groups || 'wazuh'),
+                h('span', {className: 'mono'}, item.agent_name || 'unknown'),
+                h('span', {className: 'mono'}, `rule ${item.rule_id || '--'}`)
+              )
+            ),
+            h('span', {className: `badge ${item.severity_class || 'binfo'}`}, item.level || 0)
+          );
+        })
       ) : h(EmptyState, {
         title: 'No compliance findings returned',
         detail: 'This is expected until Wazuh SCA/FIM/rootcheck/vulnerability modules produce events for real endpoint agents.',

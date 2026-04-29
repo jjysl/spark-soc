@@ -147,6 +147,34 @@
     );
   }
 
+  function FortiGateBlocklist({fortigate}) {
+    const group = fortigate?.blocklist_group || {};
+    const members = Array.isArray(group.members) ? group.members : [];
+    const policyPresent = Boolean(fortigate?.blocklist_policy_present);
+    const sparkObjects = (fortigate?.address_objects || []).filter(item => String(item.name || '').startsWith('SPARK_BLOCK_'));
+    return h('div', {className: 'card'},
+      h('div', {className: 'ch'},
+        h('div', null,
+          h('div', {className: 'ct'}, 'FortiGate SPARK Blocklist'),
+          h('div', {className: 'cs'}, 'CMDB address objects + address group evidence')
+        ),
+        h('span', {className: `badge ${policyPresent ? 'blive' : 'bhigh'}`}, policyPresent ? 'Deny policy found' : 'Policy not found')
+      ),
+      h('div', {className: 'cb'},
+        h('div', {className: 'fgrid', style: {marginBottom: 12}},
+          h(MetricTile, {label: 'Address Group', value: group.name || 'SPARK_BLOCKLIST', detail: `${fmtNum(members.length)} members`}),
+          h(MetricTile, {label: 'SPARK Objects', value: fmtNum(sparkObjects.length), detail: 'SPARK_BLOCK_* address objects'}),
+          h(MetricTile, {label: 'Policy', value: policyPresent ? 'Present' : 'Missing', detail: 'SPARK_BLOCKLIST_DENY'}),
+          h(MetricTile, {label: 'Enforcement', value: 'Pending', detail: 'Network routing validation'})
+        ),
+        members.length ? h('table', {className: 'ftable'},
+          h('thead', null, h('tr', null, h('th', null, 'Group Members'))),
+          h('tbody', null, members.slice(0, 12).map(name => h('tr', {key: name}, h('td', null, h('span', {className: 'mono'}, name)))))
+        ) : h(EmptyState, {title: 'SPARK_BLOCKLIST has no visible members', detail: 'Response actions add SPARK_BLOCK_* objects without removing existing members.'})
+      )
+    );
+  }
+
   function protocolRows(policies) {
     const counts = new Map();
     (policies || []).forEach(policy => {
@@ -304,17 +332,19 @@
         ),
         h('span', {className: 'ca'}, `${rows.length} entries`)
       ),
-      rows.length ? h('table', {className: 'ftable'},
-        h('thead', null, h('tr', null, ['IP', 'Country', 'Reason', 'Analyst', 'Time'].map(col => h('th', {key: col}, col)))),
-        h('tbody', null,
-          rows.map((item, idx) => h('tr', {key: `${item.ip || item.src_ip}-${idx}`},
-            h('td', null, h('span', {className: 'mono'}, item.ip || item.src_ip || '--')),
-            h('td', null, item.country || item.country_code || '--'),
-            h('td', null, h('span', {className: 'edesc'}, item.reason || '--')),
-            h('td', null, item.analyst || '--'),
-            h('td', null, h('span', {className: 'mono'}, item.timestamp || item.created_at || '--'))
-          ))
-        )
+      rows.length ? h('div', {className: 'compact-list'},
+        rows.map((item, idx) => h('div', {className: 'compact-row', key: `${item.ip || item.src_ip}-${idx}`},
+          h('div', {className: 'compact-main'},
+            h('div', {className: 'compact-title'}, h('span', {className: 'mono'}, item.ip || item.src_ip || '--')),
+            h('div', {className: 'compact-meta'},
+              h('span', null, item.country || item.country_code || '--'),
+              h('span', null, item.reason || '--'),
+              h('span', null, item.analyst || '--'),
+              h('span', {className: 'mono'}, item.timestamp || item.created_at || '--')
+            )
+          ),
+          h('span', {className: 'badge bcrit'}, 'Blocklist')
+        ))
       ) : h(EmptyState, {title: 'No blocked IP records', detail: 'This list is intentionally empty until SPARK creates or imports real block actions.'})
     );
   }
@@ -434,9 +464,10 @@
       ),
       h('div', {className: 'g11'},
         h(FortiGateRoutes, {routes: payload.fortigate?.routes}),
-        h(TopologySummary, {data: payload})
+        h(FortiGateBlocklist, {fortigate: payload.fortigate})
       ),
       h('div', {className: 'g11'},
+        h(TopologySummary, {data: payload}),
         h(EndpointInventory, {wazuh: payload.wazuh, ok: wzOk}),
         h(BlockedIps, {items: payload.blocked_ips})
       )

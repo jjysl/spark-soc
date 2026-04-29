@@ -60,6 +60,26 @@ def init_case_store() -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS case_action_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            case_id TEXT,
+            ticket_id TEXT,
+            action TEXT NOT NULL,
+            status TEXT NOT NULL,
+            ip TEXT,
+            object_name TEXT,
+            group_name TEXT,
+            policy_name TEXT,
+            policy_found INTEGER NOT NULL DEFAULT 0,
+            enforcement_path TEXT,
+            message TEXT,
+            payload TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
     existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(incident_cases)").fetchall()}
     migrations = {
         "rule_level": "INTEGER",
@@ -307,6 +327,88 @@ def get_blocked_ips() -> list[dict]:
 
 def get_ip_block_log() -> list[dict]:
     return list(_ip_block_log)
+
+
+def record_action_event(case_id: str = "", ticket_id: str = "", action: str = "", status: str = "", payload: dict | None = None) -> dict:
+    payload = payload or {}
+    created_at = _iso_now()
+    event = {
+        "case_id": case_id or "",
+        "ticket_id": ticket_id or "",
+        "action": action or payload.get("action", ""),
+        "status": status or payload.get("status", ""),
+        "ip": payload.get("ip", ""),
+        "object_name": payload.get("object", ""),
+        "group_name": payload.get("group", ""),
+        "policy_name": payload.get("policy", ""),
+        "policy_found": bool(payload.get("policy_found")),
+        "enforcement_path": payload.get("enforcement_path", ""),
+        "message": payload.get("message", ""),
+        "payload": payload,
+        "created_at": created_at,
+    }
+    conn = _db()
+    conn.execute(
+        """
+        INSERT INTO case_action_events (
+            case_id, ticket_id, action, status, ip, object_name, group_name,
+            policy_name, policy_found, enforcement_path, message, payload, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            event["case_id"],
+            event["ticket_id"],
+            event["action"],
+            event["status"],
+            event["ip"],
+            event["object_name"],
+            event["group_name"],
+            event["policy_name"],
+            1 if event["policy_found"] else 0,
+            event["enforcement_path"],
+            event["message"],
+            json.dumps(payload, ensure_ascii=False, sort_keys=True),
+            created_at,
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return event
+
+
+def list_action_events(limit: int = 25, case_id: str = "", ticket_id: str = "") -> list[dict]:
+    init_case_store()
+    clauses = []
+    params = []
+    if case_id:
+        clauses.append("case_id = ?")
+        params.append(case_id)
+    if ticket_id:
+        clauses.append("ticket_id = ?")
+        params.append(ticket_id)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    conn = _db()
+    rows = conn.execute(
+        f"""
+        SELECT * FROM case_action_events
+        {where}
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        params + [limit],
+    ).fetchall()
+    conn.close()
+    events = []
+    for row in rows:
+        event = dict(row)
+        event["policy_found"] = bool(event.get("policy_found"))
+        try:
+            event["payload"] = json.loads(event.get("payload") or "{}")
+        except (TypeError, ValueError):
+            event["payload"] = {}
+        events.append(event)
+    return events
 
 
 def escalate(ticket_id: str, to: str, reason: str, analyst: str) -> dict:
