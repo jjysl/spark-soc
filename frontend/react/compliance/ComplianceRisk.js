@@ -237,33 +237,6 @@
     );
   }
 
-  function EvolutionRoadmap() {
-    const phases = [
-      ['Phase 1', 'SPARK + FortiOS REST API', 'Live FortiGate monitoring, blocklist configuration and incident response evidence.'],
-      ['Phase 2', 'FortiAnalyzer', 'Centralize FortiGate/FortiClient/FortiSwitch logs and replace lab-side log gaps.'],
-      ['Phase 3', 'FortiSOAR / Shuffle', 'Move response playbooks into orchestrated approvals, enrichment and containment.'],
-      ['Phase 4', 'AI-assisted NG-SOC', 'Risk scoring, alert summaries, analyst recommendations and response prioritization.'],
-    ];
-    return h('div', {className: 'card', style: {marginTop: 14}},
-      h('div', {className: 'ch'},
-        h('div', null,
-          h('div', {className: 'ct'}, 'Fortinet NG-SOC Evolution Roadmap'),
-          h('div', {className: 'cs'}, 'Roadmap aligned with FortiAnalyzer and SOAR adoption')
-        ),
-        h('span', {className: 'badge binfo'}, 'Proposal')
-      ),
-      h('div', {className: 'cb'},
-        phases.map((phase, index) => h('div', {className: 'pbstep', key: phase[0]},
-          h('div', {className: `pbicon ${index === 0 ? 'done' : index === 1 ? 'act' : 'pend'}`}, index === 0 ? 'OK' : `${index + 1}`),
-          h('div', null,
-            h('div', {className: 'kct'}, `${phase[0]} - ${phase[1]}`),
-            h('div', {className: 'kcs'}, phase[2])
-          )
-        ))
-      )
-    );
-  }
-
   function ComplianceRiskApp() {
     const [range, setRange] = useState('7d');
     const [data, setData] = useState(null);
@@ -348,8 +321,7 @@
         h(FindingTable, {items: payload.findings || []}),
         h(MissingMappings, {notes: payload.notes || {}})
       ),
-      h(AssetRiskSegments, {payload}),
-      h(EvolutionRoadmap)
+      h(AssetRiskSegments, {payload})
     );
   }
 
