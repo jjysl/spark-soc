@@ -9,6 +9,12 @@
     'Credential Access', 'Discovery', 'Lateral Movement',
     'Command and Control', 'Exfiltration', 'Impact',
   ];
+  const MITRE_ROWS = [
+    ['P1', 'Critical'],
+    ['P2', 'High'],
+    ['P3', 'Medium'],
+    ['P4', 'Low'],
+  ];
 
   function fmtNum(value) {
     return Number(value || 0).toLocaleString('en-US');
@@ -99,29 +105,100 @@
     );
   }
 
-  function MitreHeatmap({facets, onFilter}) {
-    const buckets = facets?.tactics || [];
-    const counts = new Map(buckets.map(item => [String(item.key), item.doc_count]));
-    const max = Math.max(1, ...buckets.map(item => item.doc_count || 0));
+  function matchesFilter(alert, filter) {
+    const value = String(filter.value || '').toLowerCase();
+    if (!value) return true;
+    const groups = Array.isArray(alert.groups) ? alert.groups.map(item => String(item).toLowerCase()) : [];
+    const fieldMap = {
+      'rule.id': alert.rule_id,
+      'rule.level': alert.level,
+      'rule.groups': groups.join(' '),
+      'agent.id': alert.agent_id,
+      'agent.name': alert.agent_name,
+      'agent.ip': alert.agent_ip,
+      'manager.name': alert.manager_name,
+      'decoder.name': alert.decoder_name,
+      location: alert.location,
+      src_ip: alert.src_ip || alert.agent_ip,
+      dst_ip: alert.dst_ip,
+      'mitre.tactic': alert.mitre_tactic,
+      'mitre.technique': alert.mitre_technique,
+      priority: alert.priority,
+      status: alert.status,
+    };
+    return String(fieldMap[filter.field] ?? '').toLowerCase().includes(value);
+  }
+
+  function alertHaystack(alert) {
+    return [
+      alert.timestamp,
+      alert.description,
+      alert.rule_id,
+      alert.level,
+      alert.agent_name,
+      alert.agent_ip,
+      alert.src_ip,
+      alert.dst_ip,
+      alert.decoder_name,
+      alert.location,
+      alert.mitre_tactic,
+      alert.mitre_technique,
+      alert.priority,
+      alert.status,
+      alert.full_log,
+      Array.isArray(alert.groups) ? alert.groups.join(' ') : '',
+    ].join(' ').toLowerCase();
+  }
+
+  function applyLocalAlertFilters(alerts, filters, query) {
+    const needle = String(query || '').trim().toLowerCase();
+    return (alerts || []).filter(alert =>
+      (!needle || alertHaystack(alert).includes(needle)) &&
+      (filters || []).every(filter => matchesFilter(alert, filter))
+    );
+  }
+
+  function MitreHeatmap({alerts, onFilter}) {
+    const matrix = new Map();
+    MITRE_ROWS.forEach(([priority]) => {
+      MITRE_TACTICS.forEach(tactic => matrix.set(`${priority}|${tactic}`, 0));
+    });
+    (alerts || []).forEach(alert => {
+      const priority = alert.priority || 'P4';
+      const tactic = MITRE_TACTICS.includes(alert.mitre_tactic) ? alert.mitre_tactic : 'Impact';
+      const key = `${priority}|${tactic}`;
+      matrix.set(key, (matrix.get(key) || 0) + 1);
+    });
+    const max = Math.max(1, ...Array.from(matrix.values()));
     const colors = ['#f1f5f9', '#fee2e2', '#fca5a5', '#f87171', '#ef4444', '#b91c1c'];
     return h(React.Fragment, null,
-      h('div', {style: {display: 'grid', gridTemplateColumns: 'repeat(13,1fr)', gap: 2, marginBottom: 5}},
+      h('div', {style: {fontSize: 11, color: 'var(--tm)', marginBottom: 10}}, 'Rows are SOC priority bands. Cells show real Wazuh alert counts by MITRE tactic. Click a cell to filter the feed.'),
+      h('div', {style: {display: 'grid', gridTemplateColumns: '54px repeat(13,1fr)', gap: 2, marginBottom: 5}},
+        h('div', null),
         MITRE_TACTICS.map(tactic => h('div', {
           key: tactic,
           style: {fontSize: 8.5, fontWeight: 600, color: 'var(--tm)', textAlign: 'center', lineHeight: 1.2, paddingBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'},
         }, tactic.replace('Resource Development', 'Resource Dev').replace('Privilege Escalation', 'Priv Esc').replace('Defense Evasion', 'Def. Evasion').replace('Command and Control', 'C2')))
       ),
-      h('div', {style: {display: 'grid', gridTemplateColumns: 'repeat(13,1fr)', gap: 2}},
-        MITRE_TACTICS.map(tactic => {
-          const count = counts.get(tactic) || 0;
-          const idx = count ? Math.max(1, Math.min(5, Math.ceil((count / max) * 5))) : 0;
-          return h('div', {
-            key: tactic,
-            title: tactic,
-            onClick: () => onFilter('mitre.tactic', tactic),
-            style: {aspectRatio: '1', borderRadius: 3, background: colors[idx], cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 600, color: idx >= 3 ? '#fff' : '#991b1b'},
-          }, count || '');
-        })
+      h('div', {style: {display: 'grid', gridTemplateColumns: '54px repeat(13,1fr)', gap: 2}},
+        MITRE_ROWS.flatMap(([priority, label]) => [
+          h('div', {key: `${priority}-label`, style: {fontSize: 10, color: 'var(--tm)', fontWeight: 700, display: 'flex', alignItems: 'center'}}, priority),
+          ...MITRE_TACTICS.map(tactic => {
+            const count = matrix.get(`${priority}|${tactic}`) || 0;
+            const idx = count ? Math.max(1, Math.min(5, Math.ceil((count / max) * 5))) : 0;
+            return h('div', {
+              key: `${priority}-${tactic}`,
+              title: `${label} / ${tactic}: ${count} alerts`,
+              onClick: () => {
+                if (count) {
+                  onFilter('priority', priority);
+                  onFilter('mitre.tactic', tactic);
+                }
+              },
+              style: {height: 24, borderRadius: 3, background: colors[idx], cursor: count ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, color: idx >= 3 ? '#fff' : '#991b1b'},
+            }, count ? (count > 99 ? '99+' : count) : '');
+          }),
+        ])
       ),
       h('div', {style: {display: 'flex', alignItems: 'center', gap: 6, marginTop: 10}},
         h('span', {style: {fontSize: 10, color: 'var(--tm)'}}, 'Low'),
@@ -169,7 +246,7 @@
       );
     }
     return h('tr', {className: 'detail-row'},
-      h('td', {colSpan: 7},
+      h('td', {colSpan: 6},
         h('div', {className: 'detail-tabs'},
           tabs.map(item => h('button', {
             key: item,
@@ -190,11 +267,12 @@
     const [detailTab, setDetailTab] = useState('summary');
     const [rowsPerPage, setRowsPerPage] = useState(10);
     const [page, setPage] = useState(1);
-    const sortedAlerts = useMemo(() => [...(alerts || [])].sort((a, b) => {
+    const locallyFilteredAlerts = useMemo(() => applyLocalAlertFilters(alerts, filters, search), [alerts, filters, search]);
+    const sortedAlerts = useMemo(() => [...locallyFilteredAlerts].sort((a, b) => {
       const left = new Date(a.timestamp || 0).getTime() || 0;
       const right = new Date(b.timestamp || 0).getTime() || 0;
       return right - left;
-    }), [alerts]);
+    }), [locallyFilteredAlerts]);
     const totalPages = Math.max(1, Math.ceil(sortedAlerts.length / rowsPerPage));
     const currentPage = Math.min(page, totalPages);
     const visibleAlerts = sortedAlerts.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
@@ -217,7 +295,7 @@
           h('div', {className: 'cs'}, 'Wazuh Indexer - normalized analyst view - click values to filter')
         ),
         h('div', {style: {display: 'flex', alignItems: 'center', gap: 12}},
-          h('span', {className: 'ca'}, `${fmtNum(total)} alerts`),
+          h('span', {className: 'ca'}, `${fmtNum(sortedAlerts.length)}/${fmtNum(total)} alerts`),
           h('a', {href: '#', onClick: event => { event.preventDefault(); setRowsPerPage(50); setPage(1); }, style: {fontSize: 11, fontWeight: 600}}, 'View all')
         )
       ),
@@ -237,7 +315,7 @@
         )) : h('span', {style: {fontSize: 11, color: 'var(--tm)'}}, 'No active field filters')
       ),
       h('table', {className: 'ftable'},
-        h('thead', null, h('tr', null, ['Time', 'Source IP', 'Agent', 'Rule', 'MITRE', 'Priority', 'Status'].map(col => h('th', {key: col}, col)))),
+        h('thead', null, h('tr', null, ['Time', 'Description', 'Source IP', 'MITRE', 'Severity', 'Status'].map(col => h('th', {key: col}, col)))),
         h('tbody', null,
           visibleAlerts.length ? visibleAlerts.flatMap(alert => {
             const id = String(alert.document_id || `${alert.rule_id}-${alert.timestamp}`);
@@ -245,19 +323,18 @@
             return [
               h('tr', {key: id, onClick: () => setOpenId(isOpen ? '' : id)},
                 h('td', null, h('span', {className: 'mono', title: fmtDateTime(alert.timestamp)}, fmtTime(alert.timestamp))),
-                h('td', null, h(FilterButton, {field: 'src_ip', value: alert.src_ip, label: alert.src_ip || alert.agent_ip || '--', onFilter: addFilter})),
-                h('td', null, h(FilterButton, {field: 'agent.name', value: alert.agent_name, label: alert.agent_name || 'unknown', onFilter: addFilter})),
                 h('td', null,
                   h('div', {className: 'edesc', title: alert.description}, alert.description || 'Wazuh alert'),
-                  h('div', {style: {fontSize: 10, color: 'var(--tm)', marginTop: 2}}, `Rule ${alert.rule_id || '-'} - level ${alert.level || 0}`)
+                  h('div', {style: {fontSize: 10, color: 'var(--tm)', marginTop: 2}}, `${alert.agent_name || 'unknown'} - Rule ${alert.rule_id || '-'} / level ${alert.level || 0}`)
                 ),
+                h('td', null, h(FilterButton, {field: 'src_ip', value: alert.src_ip || alert.agent_ip, label: alert.src_ip || alert.agent_ip || '--', onFilter: addFilter})),
                 h('td', null, h(FilterButton, {field: 'mitre.tactic', value: alert.mitre_tactic, label: shortTactic(alert.mitre_tactic), onFilter: addFilter})),
-                h('td', null, h('span', {className: `badge ${clsPriority(alert.priority)}`}, alert.priority || 'P4')),
+                h('td', null, h('span', {className: `badge ${alert.severity_class || 'binfo'}`}, alert.severity || 'Info')),
                 h('td', null, h('span', {className: `badge ${alert.status_class || 'bnew'}`}, alert.status || 'New'))
               ),
               isOpen ? h(AlertDetail, {key: `${id}-detail`, alert, tab: detailTab, setTab: setDetailTab, onFilter: addFilter}) : null,
             ].filter(Boolean);
-          }) : h('tr', null, h('td', {colSpan: 7, style: {color: 'var(--tm)', fontSize: 12}}, 'No Wazuh alerts matched the current query.'))
+          }) : h('tr', null, h('td', {colSpan: 6, style: {color: 'var(--tm)', fontSize: 12}}, 'No Wazuh alerts matched the current query.'))
         )
       ),
       h('div', {style: {display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderTop: '1px solid var(--border)'}},
@@ -418,6 +495,91 @@
     );
   }
 
+  function ThreatHuntingPanel({alerts, onFilter}) {
+    const externalCount = alerts.filter(alert => alert.src_ip && !/^(10\.|127\.|172\.(1[6-9]|2\d|3[0-1])\.|192\.168\.)/.test(alert.src_ip)).length;
+    const hunts = [
+      {title: 'High-priority detections', detail: 'P1/P2 alerts in the selected window', field: 'priority', value: 'P2', count: alerts.filter(alert => ['P1', 'P2'].includes(alert.priority)).length},
+      {title: 'Rootcheck / host anomaly', detail: 'Endpoint integrity and anomaly alerts', field: 'decoder.name', value: 'rootcheck', count: alerts.filter(alert => alert.decoder_name === 'rootcheck').length},
+      {title: 'External source indicators', detail: 'Public source IPs observed in alerts', field: 'src_ip', value: alerts.find(alert => alert.src_ip)?.src_ip || '', count: externalCount},
+      {title: 'MITRE-mapped detections', detail: 'Alerts with mapped tactic or technique fields', field: 'mitre.tactic', value: alerts.find(alert => alert.mitre_tactic)?.mitre_tactic || '', count: alerts.filter(alert => alert.mitre_tactic || alert.mitre_technique).length},
+    ];
+    return h('div', {className: 'card', style: {marginBottom: 14}},
+      h('div', {className: 'ch'},
+        h('div', null,
+          h('div', {className: 'ct'}, 'Threat Hunting Workspace'),
+          h('div', {className: 'cs'}, 'Quick hunts built from the current Wazuh result set')
+        ),
+        h('span', {className: 'badge binfo'}, `${fmtNum(alerts.length)} scoped alerts`)
+      ),
+      h('div', {className: 'cb', style: {display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10}},
+        hunts.map(hunt => h('button', {
+          key: hunt.title,
+          className: 'detail-cell',
+          style: {textAlign: 'left', cursor: hunt.value ? 'pointer' : 'default'},
+          onClick: () => hunt.value && onFilter(hunt.field, hunt.value),
+        },
+          h('div', {className: 'detail-label'}, hunt.title),
+          h('div', {className: 'detail-value'}, hunt.detail),
+          h('div', {style: {fontSize: 18, fontWeight: 700, color: 'var(--red)', marginTop: 8}}, fmtNum(hunt.count))
+        ))
+      )
+    );
+  }
+
+  function TriageRulePanel({filters, rules, setRules}) {
+    const [name, setName] = useState('');
+    const [priority, setPriority] = useState('P2');
+    const condition = filters.length ? filters.map(filter => `${filter.field}:${filter.value}`).join(' AND ') : 'current visible detections';
+
+    function saveRule() {
+      const rule = {
+        id: `TRIAGE-${Date.now()}`,
+        name: name.trim() || `Rule ${rules.length + 1}`,
+        priority,
+        condition,
+        action: 'Promote matching alerts to analyst review',
+        created: new Date().toISOString(),
+      };
+      const next = [rule, ...rules].slice(0, 8);
+      setRules(next);
+      localStorage.setItem('sparkThreatTriageRules', JSON.stringify(next));
+      setName('');
+    }
+
+    return h('div', {className: 'card', style: {marginBottom: 14}},
+      h('div', {className: 'ch'},
+        h('div', null,
+          h('div', {className: 'ct'}, 'New Triage Rule'),
+          h('div', {className: 'cs'}, 'Local analyst rule draft from current filters')
+        ),
+        h('span', {className: 'badge binfo'}, `${rules.length} saved`)
+      ),
+      h('div', {className: 'cb'},
+        h('div', {style: {display: 'grid', gridTemplateColumns: '2fr 120px auto', gap: 10, alignItems: 'end'}},
+          h('div', null,
+            h('div', {className: 'jm-label'}, 'Rule name'),
+            h('input', {className: 'wq-search', value: name, onChange: event => setName(event.target.value), placeholder: 'Example: Rootcheck P2 anomaly triage'})
+          ),
+          h('div', null,
+            h('div', {className: 'jm-label'}, 'Priority'),
+            h('select', {className: 'jm-select', value: priority, onChange: event => setPriority(event.target.value)}, ['P1', 'P2', 'P3', 'P4'].map(item => h('option', {key: item, value: item}, item)))
+          ),
+          h('button', {className: 'btn btnp', onClick: saveRule}, 'Save Rule')
+        ),
+        h('div', {style: {fontSize: 11, color: 'var(--tm)', marginTop: 8}}, `Condition: ${condition}`),
+        rules.length ? h('table', {className: 'ftable', style: {marginTop: 12}},
+          h('thead', null, h('tr', null, ['Rule', 'Priority', 'Condition', 'Action'].map(col => h('th', {key: col}, col)))),
+          h('tbody', null, rules.map(rule => h('tr', {key: rule.id},
+            h('td', null, rule.name),
+            h('td', null, h('span', {className: `badge ${clsPriority(rule.priority)}`}, rule.priority)),
+            h('td', null, rule.condition),
+            h('td', null, rule.action)
+          )))
+        ) : null
+      )
+    );
+  }
+
   function ThreatDetectionApp() {
     const [range, setRange] = useState('24h');
     const [searchInput, setSearchInput] = useState('');
@@ -426,6 +588,14 @@
     const [data, setData] = useState(null);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const [toolPanel, setToolPanel] = useState('');
+    const [triageRules, setTriageRules] = useState(() => {
+      try {
+        return JSON.parse(localStorage.getItem('sparkThreatTriageRules') || '[]');
+      } catch {
+        return [];
+      }
+    });
 
     useEffect(() => {
       const timer = setTimeout(() => setQuery(searchInput.trim()), 300);
@@ -441,7 +611,6 @@
       setLoading(true);
       const params = new URLSearchParams({range, size: '100'});
       if (query) params.set('q', query);
-      filters.forEach(filter => params.append('filter', `${filter.field}:${filter.value}`));
       try {
         const response = await fetch(`/spark/threat-detection?${params.toString()}`, {credentials: 'include'});
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -468,10 +637,11 @@
       load();
       const timer = setInterval(load, 30000);
       return () => clearInterval(timer);
-    }, [range, query, JSON.stringify(filters)]);
+    }, [range, query]);
 
     const payload = data || {source: 'loading', total: 0, counts: {}, facets: {tactics: [], decoders: []}, timeline: [], alerts: [], triage: 'Loading Wazuh Indexer alerts.'};
     const live = payload.source === 'opensearch-live';
+    const scopedAlerts = useMemo(() => applyLocalAlertFilters(payload.alerts || [], filters, searchInput), [payload.alerts, filters, searchInput]);
 
     return h(React.Fragment, null,
       h('div', {className: 'ph'},
@@ -479,8 +649,13 @@
           h('div', {className: 'ptitle'}, 'Threat Detection & Intelligence'),
           h('div', {className: 'psub'}, h('span', {className: 'ldot'}), loading ? `Updating ${range} detections...` : 'Wazuh Indexer - normalized detections - live filters')
         ),
-        h('div', {className: 'ha'}, h('button', {className: 'btn'}, 'Threat Hunting'), h('button', {className: 'btn btnp'}, 'New Triage Rule'))
+        h('div', {className: 'ha'},
+          h('button', {className: 'btn', onClick: () => setToolPanel(toolPanel === 'hunt' ? '' : 'hunt')}, 'Threat Hunting'),
+          h('button', {className: 'btn btnp', onClick: () => setToolPanel(toolPanel === 'rule' ? '' : 'rule')}, 'New Triage Rule')
+        )
       ),
+      toolPanel === 'hunt' ? h(ThreatHuntingPanel, {alerts: scopedAlerts, onFilter: addFilter}) : null,
+      toolPanel === 'rule' ? h(TriageRulePanel, {filters, rules: triageRules, setRules: setTriageRules}) : null,
       h('div', {className: `aibox ${live ? '' : 'loading'}`},
         h('strong', null, 'SPARK Threat Triage: '),
         error ? `${payload.triage} Keeping the page free of fallback mock data.` : payload.triage
@@ -498,7 +673,7 @@
             h('div', null, h('div', {className: 'ct'}, 'MITRE ATT&CK Heatmap'), h('div', {className: 'cs'}, 'Detection activity from Wazuh rule MITRE fields')),
             h('span', {className: 'ca'}, 'Full matrix')
           ),
-          h('div', {className: 'cb'}, h(MitreHeatmap, {facets: payload.facets, onFilter: addFilter}))
+          h('div', {className: 'cb'}, h(MitreHeatmap, {alerts: scopedAlerts, onFilter: addFilter}))
         )
       ),
       h('div', {className: 'g11'},
