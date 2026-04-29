@@ -82,7 +82,7 @@
         h('div', {className: 'ch'},
           h('div', null,
             h('div', {className: 'ct'}, 'Controls by Framework'),
-            h('div', {className: 'cs'}, 'Evidence-based estimate from Wazuh modules; not an audit attestation')
+            h('div', {className: 'cs'}, 'Score = agent readiness + Wazuh evidence + module-specific control coverage')
           )
         ),
         h('div', {className: 'cb'},
@@ -95,7 +95,10 @@
               ),
               h('div', {className: 'ctrack'}, h('div', {className: 'cfill', style: {width: `${item.value}%`, background: color}}))
             );
-          })
+          }),
+          h('div', {style: {fontSize: 11, color: 'var(--tm)', marginTop: 10}},
+            'These are presentation scores for NG-SOC posture. They are derived from active Wazuh agents, compliance/security findings, and matching evidence modules; they are not formal ISO/PCI/LGPD/NIST audit results.'
+          )
         )
       )
     );
@@ -157,16 +160,21 @@
   }
 
   function FindingTable({items}) {
+    const [expanded, setExpanded] = useState(false);
+    const visibleItems = expanded ? items : items.slice(0, 6);
     return h('div', {className: 'card'},
       h('div', {className: 'ch'},
         h('div', null,
           h('div', {className: 'ct'}, 'Recent Compliance Findings'),
           h('div', {className: 'cs'}, 'SCA, FIM, rootcheck, vulnerability and audit alerts')
         ),
-        h('span', {className: 'ca'}, `${fmtNum(items.length)} shown`)
+        h('div', {style: {display: 'flex', alignItems: 'center', gap: 8}},
+          h('span', {className: 'ca'}, `${fmtNum(visibleItems.length)}/${fmtNum(items.length)} shown`),
+          items.length > 6 ? h('button', {className: 'btn', onClick: () => setExpanded(value => !value)}, expanded ? 'Collapse' : 'View all') : null
+        )
       ),
       items.length ? h('div', {className: 'compact-list'},
-        items.map(item => {
+        visibleItems.map(item => {
           const groups = Array.isArray(item.groups) ? item.groups.slice(0, 3).join(', ') : '';
           return h('div', {className: 'compact-row', key: item.document_id || `${item.rule_id}-${item.timestamp}`},
             h('div', {className: 'compact-main'},
@@ -212,18 +220,45 @@
     return h('div', {className: 'card'},
       h('div', {className: 'ch'},
         h('div', null,
-          h('div', {className: 'ct'}, 'Framework Mapping Status'),
-          h('div', {className: 'cs'}, 'No fake ISO/PCI/LGPD/NIST scores are rendered')
+          h('div', {className: 'ct'}, 'Framework Evidence Notes'),
+          h('div', {className: 'cs'}, 'What is measured now and what requires audit mapping later')
         )
       ),
       h('div', {className: 'cb'},
         [
-          ['Framework scores', notes?.frameworks],
+          ['Framework scores', 'Current scores are estimated from Wazuh evidence and agent readiness; formal audit control mapping is roadmap work.'],
           ['FortiGate policy posture', notes?.fortigate],
           ['Evidence collection', 'Persist evidence snapshots and case links before generating audit-ready reports.'],
         ].map(row => h('div', {className: 'pbstep', key: row[0]},
           h('div', {className: 'pbicon pend'}, '!'),
           h('div', null, h('div', {className: 'kct'}, row[0]), h('div', {className: 'kcs'}, row[1]))
+        ))
+      )
+    );
+  }
+
+  function EvolutionRoadmap() {
+    const phases = [
+      ['Phase 1', 'SPARK + FortiOS REST API', 'Live FortiGate monitoring, blocklist configuration and incident response evidence.'],
+      ['Phase 2', 'FortiAnalyzer', 'Centralize FortiGate/FortiClient/FortiSwitch logs and replace lab-side log gaps.'],
+      ['Phase 3', 'FortiSOAR / Shuffle', 'Move response playbooks into orchestrated approvals, enrichment and containment.'],
+      ['Phase 4', 'AI-assisted NG-SOC', 'Risk scoring, alert summaries, analyst recommendations and response prioritization.'],
+    ];
+    return h('div', {className: 'card', style: {marginTop: 14}},
+      h('div', {className: 'ch'},
+        h('div', null,
+          h('div', {className: 'ct'}, 'Fortinet NG-SOC Evolution Roadmap'),
+          h('div', {className: 'cs'}, 'Roadmap aligned with FortiAnalyzer and SOAR adoption')
+        ),
+        h('span', {className: 'badge binfo'}, 'Proposal')
+      ),
+      h('div', {className: 'cb'},
+        phases.map((phase, index) => h('div', {className: 'pbstep', key: phase[0]},
+          h('div', {className: `pbicon ${index === 0 ? 'done' : index === 1 ? 'act' : 'pend'}`}, index === 0 ? 'OK' : `${index + 1}`),
+          h('div', null,
+            h('div', {className: 'kct'}, `${phase[0]} - ${phase[1]}`),
+            h('div', {className: 'kcs'}, phase[2])
+          )
         ))
       )
     );
@@ -282,7 +317,6 @@
     };
     const indexerOk = !payload.errors?.wazuh_indexer && payload.source !== 'loading';
     const apiOk = !payload.errors?.wazuh_api && payload.source !== 'loading';
-    const modules = payload.modules || {};
     const status = useMemo(() => {
       if (loading) return `Updating ${range} compliance telemetry...`;
       if (updatedAt) return `Live source check - updated ${updatedAt.toLocaleTimeString('en-US')}`;
@@ -314,7 +348,8 @@
         h(FindingTable, {items: payload.findings || []}),
         h(MissingMappings, {notes: payload.notes || {}})
       ),
-      h(AssetRiskSegments, {payload})
+      h(AssetRiskSegments, {payload}),
+      h(EvolutionRoadmap)
     );
   }
 
