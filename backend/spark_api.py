@@ -484,7 +484,7 @@ def network_endpoint():
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
 
-    if fortigate_data.get("source") != "fortigate-live":
+    if fortigate_data.get("source") not in {"fortigate-live", "not_configured"}:
         errors["fortigate"] = fortigate_data.get("error", "offline")
         fortigate_data = {
             "source": "offline",
@@ -541,6 +541,7 @@ def incident_response():
                 shuffle.get_status,
                 config.SHUFFLE_BASE_URL,
                 config.SHUFFLE_API_KEY,
+                getattr(config, "SHUFFLE_BACKEND_URL", ""),
             ),
             "alerts": executor.submit(
                 wazuh.get_threat_detection_alerts,
@@ -749,6 +750,7 @@ def executive_overview():
                 shuffle.get_status,
                 config.SHUFFLE_BASE_URL,
                 config.SHUFFLE_API_KEY,
+                getattr(config, "SHUFFLE_BACKEND_URL", ""),
             ),
         }
 
@@ -774,7 +776,7 @@ def executive_overview():
             fortigate_data = futures["fortigate"].result(timeout=4)
         except TimeoutError:
             fortigate_data = {"source": "offline", "cpu": 0, "mem": 0, "sessions": 0, "error": "timeout"}
-        if fortigate_data.get("source") != "fortigate-live":
+        if fortigate_data.get("source") not in {"fortigate-live", "not_configured"}:
             errors["fortigate"] = fortigate_data.get("error", "offline")
 
         try:

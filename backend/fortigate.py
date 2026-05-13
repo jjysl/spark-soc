@@ -16,6 +16,18 @@ DEFAULT_BLOCKLIST_GROUP = "SPARK_BLOCKLIST"
 DEFAULT_BLOCKLIST_POLICY = "SPARK_BLOCKLIST_DENY"
 
 
+def _not_configured() -> dict:
+    return {
+        "source": "not_configured",
+        "cpu": 0,
+        "mem": 0,
+        "disk": 0,
+        "sessions": 0,
+        "error": "",
+        "message": "Set FORTIGATE_BASE_URL and FORTIGATE_API_KEY when the FortiGate VM is ready.",
+    }
+
+
 def _request(method: str, base_url: str, path: str, api_key: str, **kwargs) -> requests.Response:
     if not base_url:
         raise ValueError("FORTIGATE_BASE_URL is not configured")
@@ -36,6 +48,9 @@ def _request(method: str, base_url: str, path: str, api_key: str, **kwargs) -> r
 
 def get_resource_usage(base_url: str, api_key: str) -> dict:
     """Return live CPU, memory, disk and session counters from FortiGate."""
+    if not base_url or not api_key:
+        return _not_configured()
+
     try:
         response = _request(
             "GET",
@@ -258,6 +273,20 @@ def get_system_status(base_url: str, api_key: str) -> dict:
 
 def get_network_inventory(base_url: str, api_key: str) -> dict:
     """Collect Monitor/CMDB API data for Network & Endpoint without synthetic fallback."""
+    if not base_url or not api_key:
+        return {
+            **_not_configured(),
+            "system": {},
+            "interfaces": [],
+            "policies": [],
+            "routes": [],
+            "policy_stats": [],
+            "address_objects": [],
+            "blocklist_group": {},
+            "blocklist_policy_present": False,
+            "api_status": {},
+        }
+
     resource = get_resource_usage(base_url, api_key)
     interfaces = _safe_call("interfaces", get_interfaces, base_url, api_key)
     policies = _safe_call("policies", get_firewall_policies, base_url, api_key)

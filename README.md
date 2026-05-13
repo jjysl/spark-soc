@@ -19,9 +19,8 @@ nova máquina, copie `config.example.py` para `config.py` e preencha os tokens.
 O Wazuh Indexer fica protegido dentro da VM em `localhost:9200`. No Windows/host,
 o SPARK acessa ele por um tunnel local em `https://localhost:19200`.
 
-1. Ligue a VM Wazuh.
-2. Confirme que o port forwarding SSH do VirtualBox existe:
-   `localhost:2222 -> VM:22`.
+1. Ligue a VM Wazuh/Shuffle no VMware.
+2. Confirme que o host alcança a VM em `192.168.50.20` e que SSH responde na porta `22`.
 3. Suba o tunnel:
 
 ```powershell
@@ -45,6 +44,15 @@ Ou suba tunnel + Flask de uma vez:
 
 ```powershell
 .\scripts\start-spark.ps1
+```
+
+Defaults do lab VMware:
+
+```powershell
+$env:WAZUH_BASE="https://192.168.50.20:55000"
+$env:SHUFFLE_BASE_URL="http://192.168.50.20:3001"
+$env:SHUFFLE_BACKEND_URL="http://192.168.50.20:5001"
+$env:INDEXER_BASE="https://localhost:19200"
 ```
 
 Para encerrar o tunnel:

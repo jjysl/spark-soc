@@ -1,7 +1,7 @@
 param(
     [string]$SshUser = "wazuh",
-    [string]$SshHost = "127.0.0.1",
-    [int]$SshPort = 2222,
+    [string]$SshHost = "192.168.50.20",
+    [int]$SshPort = 22,
     [string]$KeyPath = "$env:USERPROFILE\.ssh\sparksoc_wazuh_ed25519"
 )
 
@@ -37,7 +37,7 @@ if (-not (Test-Path "$KeyPath.pub")) {
 $publicKey = (Get-Content "$KeyPath.pub" -Raw).Trim()
 $remoteCommand = "mkdir -p ~/.ssh && chmod 700 ~/.ssh && grep -qxF '$publicKey' ~/.ssh/authorized_keys 2>/dev/null || echo '$publicKey' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
 
-Write-Host "[SPARK] Instalando chave publica na VM Wazuh via SSH localhost:$SshPort" -ForegroundColor Cyan
+Write-Host "[SPARK] Instalando chave publica na VM Wazuh via SSH ${SshHost}:$SshPort" -ForegroundColor Cyan
 Write-Host "[SPARK] Digite a senha do usuario '$SshUser' da VM quando o ssh pedir." -ForegroundColor Yellow
 ssh -o StrictHostKeyChecking=accept-new -p $SshPort "$SshUser@$SshHost" $remoteCommand
 

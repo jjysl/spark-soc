@@ -10,8 +10,11 @@ import os
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
+SPARK_PROFILE = os.environ.get("SPARK_PROFILE", "local")
+WAZUH_MANAGER_IP = os.environ.get("WAZUH_MANAGER_IP", "127.0.0.1")
+WAZUH_AGENT_IP = os.environ.get("WAZUH_AGENT_IP", "")
 
-FORTIGATE_BASE_URL = os.environ.get("FORTIGATE_BASE_URL", "https://FORTIGATE_IP")
+FORTIGATE_BASE_URL = os.environ.get("FORTIGATE_BASE_URL", "")
 FORTIGATE_API_KEY = os.environ.get("FORTIGATE_API_KEY", "")
 FORTIGATE_BLOCKLIST_GROUP = os.environ.get("FORTIGATE_BLOCKLIST_GROUP", "SPARK_BLOCKLIST")
 FORTIGATE_BLOCKLIST_POLICY = os.environ.get("FORTIGATE_BLOCKLIST_POLICY", "SPARK_BLOCKLIST_DENY")
@@ -23,11 +26,12 @@ INDEXER_BASE = os.environ.get("INDEXER_BASE", "https://localhost:19200")
 INDEXER_USER = os.environ.get("INDEXER_USER", "admin")
 INDEXER_PASS = os.environ.get("INDEXER_PASS", "")
 
-WAZUH_BASE = os.environ.get("WAZUH_BASE", "https://localhost:55000")
+WAZUH_BASE = os.environ.get("WAZUH_BASE", f"https://{WAZUH_MANAGER_IP}:55000")
 WAZUH_USER = os.environ.get("WAZUH_USER", "wazuh")
 WAZUH_PASS = os.environ.get("WAZUH_PASS", "")
 
-SHUFFLE_BASE_URL = os.environ.get("SHUFFLE_BASE_URL", "http://localhost:3001")
+SHUFFLE_BASE_URL = os.environ.get("SHUFFLE_BASE_URL", f"http://{WAZUH_MANAGER_IP}:3001")
+SHUFFLE_BACKEND_URL = os.environ.get("SHUFFLE_BACKEND_URL", "")
 SHUFFLE_API_KEY = os.environ.get("SHUFFLE_API_KEY", "")
 SHUFFLE_INCIDENT_WEBHOOK_URL = os.environ.get("SHUFFLE_INCIDENT_WEBHOOK_URL", "")
 SHUFFLE_INCIDENT_WORKFLOW = os.environ.get("SHUFFLE_INCIDENT_WORKFLOW", "SPARK - Incident Response Evidence")

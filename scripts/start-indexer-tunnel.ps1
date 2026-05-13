@@ -1,7 +1,7 @@
 param(
     [string]$SshUser = "wazuh",
-    [string]$SshHost = "127.0.0.1",
-    [int]$SshPort = 2222,
+    [string]$SshHost = "192.168.50.20",
+    [int]$SshPort = 22,
     [int]$LocalIndexerPort = 19200,
     [int]$RemoteIndexerPort = 9200,
     [string]$KeyPath = "$env:USERPROFILE\.ssh\sparksoc_wazuh_ed25519"
@@ -54,7 +54,7 @@ if (Test-PortListening -Port $LocalIndexerPort) {
         "$SshUser@$SshHost"
     ) | ForEach-Object { $_ }
 
-    Write-Host "[SPARK] Abrindo tunel Wazuh Indexer: https://localhost:$LocalIndexerPort -> VM localhost:$RemoteIndexerPort" -ForegroundColor Cyan
+    Write-Host "[SPARK] Abrindo tunel Wazuh Indexer: https://localhost:$LocalIndexerPort -> ${SshHost}:localhost:$RemoteIndexerPort" -ForegroundColor Cyan
     if ($hasKeyAuth) {
         Write-Host "[SPARK] Chave SSH detectada. O tunel vai rodar em segundo plano." -ForegroundColor DarkGray
         $windowStyle = "Hidden"
@@ -66,11 +66,11 @@ if (Test-PortListening -Port $LocalIndexerPort) {
     Start-Sleep -Seconds 3
 
     if (-not (Test-PortListening -Port $LocalIndexerPort)) {
-        throw "O tunel nao abriu a porta local $LocalIndexerPort. Verifique se a VM esta ligada e se o SSH em localhost:$SshPort funciona."
+        throw "O tunel nao abriu a porta local $LocalIndexerPort. Verifique se a VM esta ligada e se o SSH em ${SshHost}:$SshPort funciona."
     }
 
     Write-Host "[SPARK] Tunel iniciado. PID: $($process.Id)" -ForegroundColor Green
 }
 
 Write-Host "[SPARK] Teste rapido:" -ForegroundColor Cyan
-Write-Host 'Use Invoke-WebRequest com -Credential ou abra https://localhost:'$LocalIndexerPort' no navegador para validar o tunnel.' -ForegroundColor DarkGray
+Write-Host "Use Invoke-WebRequest com -Credential ou abra https://localhost:$LocalIndexerPort no navegador para validar o tunnel." -ForegroundColor DarkGray
