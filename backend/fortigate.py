@@ -9,6 +9,7 @@ from __future__ import annotations
 import ipaddress
 import requests
 import urllib3
+from requests import exceptions as request_exceptions
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -19,12 +20,35 @@ DEFAULT_BLOCKLIST_POLICY = "SPARK_BLOCKLIST_DENY"
 def _not_configured() -> dict:
     return {
         "source": "not_configured",
+        "status": "not_configured",
         "cpu": 0,
         "mem": 0,
         "disk": 0,
         "sessions": 0,
         "error": "",
         "message": "Set FORTIGATE_BASE_URL and FORTIGATE_API_KEY when the FortiGate VM is ready.",
+    }
+
+
+def _error_state(exc: Exception, endpoint: str) -> dict:
+    status = "endpoint_error"
+    if isinstance(exc, (request_exceptions.Timeout, request_exceptions.ConnectTimeout, request_exceptions.ReadTimeout)):
+        status = "timeout"
+    elif isinstance(exc, (ValueError, request_exceptions.JSONDecodeError)):
+        status = "parse_error"
+    elif isinstance(exc, requests.HTTPError):
+        code = exc.response.status_code if exc.response is not None else None
+        if code in (401, 403):
+            status = "auth_failed"
+    return {
+        "source": "offline",
+        "status": status,
+        "cpu": 0,
+        "mem": 0,
+        "disk": 0,
+        "sessions": 0,
+        "error": str(exc),
+        "endpoint": endpoint,
     }
 
 
@@ -35,11 +59,14 @@ def _request(method: str, base_url: str, path: str, api_key: str, **kwargs) -> r
         raise ValueError("FORTIGATE_API_KEY is not configured")
 
     params = kwargs.pop("params", {}) or {}
-    params.setdefault("access_token", api_key)
+    headers = kwargs.pop("headers", {}) or {}
+    token = api_key.removeprefix("Bearer ").strip()
+    headers.setdefault("Authorization", f"Bearer {token}")
     return requests.request(
         method,
         f"{base_url.rstrip('/')}{path}",
         params=params,
+        headers=headers,
         verify=False,
         timeout=kwargs.pop("timeout", 10),
         **kwargs,
@@ -47,39 +74,59 @@ def _request(method: str, base_url: str, path: str, api_key: str, **kwargs) -> r
 
 
 def get_resource_usage(base_url: str, api_key: str) -> dict:
-    """Return live CPU, memory, disk and session counters from FortiGate."""
+    """Return live FortiGate status plus resource counters when available."""
     if not base_url or not api_key:
         return _not_configured()
+
+    status_endpoint = "/api/v2/monitor/system/status"
+    try:
+        system = get_system_status(base_url, api_key)
+    except Exception as exc:
+        return _error_state(exc, status_endpoint)
+
+    resource_endpoint = "/api/v2/monitor/system/resource/usage"
+    payload = {
+        "source": "fortigate-live",
+        "status": "online",
+        "cpu": 0,
+        "mem": 0,
+        "disk": 0,
+        "sessions": 0,
+        "serial": system.get("serial", ""),
+        "version": system.get("version", ""),
+        "system": system,
+        "health_endpoint": status_endpoint,
+        "resource_endpoint": resource_endpoint,
+        "resource_status": "not_queried",
+        "error": "",
+    }
 
     try:
         response = _request(
             "GET",
             base_url,
-            "/api/v2/monitor/system/resource/usage",
+            resource_endpoint,
             api_key,
             params={"interval": "1-min"},
             timeout=10,
         )
         response.raise_for_status()
-        results = response.json().get("results", {})
-        return {
-            "source": "fortigate-live",
-            "cpu": results.get("cpu", [{}])[0].get("current", 0),
-            "mem": results.get("mem", [{}])[0].get("current", 0),
-            "disk": results.get("disk", [{}])[0].get("current", 0),
-            "sessions": results.get("session", [{}])[0].get("current", 0),
-            "serial": response.json().get("serial", ""),
-            "version": response.json().get("version", ""),
-        }
+        resource_payload = response.json()
+        results = resource_payload.get("results", {})
+        payload.update({
+            "cpu": _metric_current(results, "cpu"),
+            "mem": _metric_current(results, "mem"),
+            "disk": _metric_current(results, "disk"),
+            "sessions": _metric_current(results, "session"),
+            "serial": resource_payload.get("serial", "") or payload["serial"],
+            "version": resource_payload.get("version", "") or payload["version"],
+            "resource_status": "online",
+        })
     except Exception as exc:
-        return {
-            "source": "offline",
-            "cpu": 0,
-            "mem": 0,
-            "disk": 0,
-            "sessions": 0,
-            "error": str(exc),
-        }
+        resource_error = _error_state(exc, resource_endpoint)
+        payload["resource_status"] = resource_error["status"]
+        payload["resource_error"] = resource_error["error"]
+    return payload
 
 
 def _json_request(method: str, base_url: str, path: str, api_key: str, **kwargs) -> dict:
@@ -97,6 +144,13 @@ def _as_list(value) -> list:
     if isinstance(value, dict):
         return list(value.values())
     return []
+
+
+def _metric_current(results: dict, key: str) -> int:
+    values = results.get(key) or []
+    if isinstance(values, list) and values and isinstance(values[0], dict):
+        return values[0].get("current", 0) or 0
+    return 0
 
 
 def _object_name_for_ip(ip: str) -> str:
@@ -308,12 +362,12 @@ def get_network_inventory(base_url: str, api_key: str) -> dict:
         "blocklist_group": blocklist["items"][0] if blocklist["items"] else {},
         "blocklist_policy_present": DEFAULT_BLOCKLIST_POLICY in policy_names,
         "api_status": {
-            "resource_usage": {"endpoint": "/api/v2/monitor/system/resource/usage", "ok": resource.get("source") == "fortigate-live", "error": resource.get("error", "")},
+            "resource_usage": {"endpoint": "/api/v2/monitor/system/resource/usage", "ok": resource.get("resource_status") == "online", "error": resource.get("resource_error", "")},
             "interfaces": {"endpoint": "/api/v2/monitor/system/interface or /api/v2/cmdb/system/interface", "ok": interfaces["source"] == "fortigate-live", "error": interfaces["error"]},
             "policies": {"endpoint": "/api/v2/cmdb/firewall/policy", "ok": policies["source"] == "fortigate-live", "error": policies["error"]},
             "routes": {"endpoint": "/api/v2/cmdb/router/static", "ok": routes["source"] == "fortigate-live", "error": routes["error"]},
             "policy_stats": {"endpoint": "/api/v2/monitor/firewall/policy", "ok": policy_stats["source"] == "fortigate-live", "error": policy_stats["error"]},
-            "system_status": {"endpoint": "/api/v2/monitor/system/status", "ok": system["source"] == "fortigate-live", "error": system["error"]},
+            "system_status": {"endpoint": "/api/v2/monitor/system/status", "ok": resource.get("source") == "fortigate-live", "error": resource.get("error", "")},
             "address_objects": {"endpoint": "/api/v2/cmdb/firewall/address", "ok": address_objects["source"] == "fortigate-live", "error": address_objects["error"]},
             "blocklist_group": {"endpoint": f"/api/v2/cmdb/firewall/addrgrp/{DEFAULT_BLOCKLIST_GROUP}", "ok": blocklist["source"] == "fortigate-live", "error": blocklist["error"]},
         },
