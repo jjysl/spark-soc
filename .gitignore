@@ -1,5 +1,10 @@
 config.py
 .env
+spark-soc.tar.gz
+spark-deps.tar.gz
+wheelhouse/
+node_modules/
+vendor/
 
 events.db
 data/*.db

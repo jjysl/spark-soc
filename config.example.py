@@ -13,6 +13,7 @@ DATA_DIR = BASE_DIR / "data"
 SPARK_PROFILE = os.environ.get("SPARK_PROFILE", "local")
 WAZUH_MANAGER_IP = os.environ.get("WAZUH_MANAGER_IP", "127.0.0.1")
 WAZUH_AGENT_IP = os.environ.get("WAZUH_AGENT_IP", "")
+DEFAULT_INDEXER_BASE = "https://localhost:9200" if SPARK_PROFILE == "vmware-lab" else "https://localhost:19200"
 
 FORTIGATE_BASE_URL = os.environ.get("FORTIGATE_BASE_URL", "")
 FORTIGATE_API_KEY = os.environ.get("FORTIGATE_API_KEY", "")
@@ -22,7 +23,7 @@ FORTIGATE_BLOCKLIST_POLICY = os.environ.get("FORTIGATE_BLOCKLIST_POLICY", "SPARK
 ABUSEIPDB_API_KEY = os.environ.get("ABUSEIPDB_API_KEY", "")
 OTX_API_KEY = os.environ.get("OTX_API_KEY", "")
 
-INDEXER_BASE = os.environ.get("INDEXER_BASE", "https://localhost:19200")
+INDEXER_BASE = os.environ.get("INDEXER_BASE", DEFAULT_INDEXER_BASE)
 INDEXER_USER = os.environ.get("INDEXER_USER", "admin")
 INDEXER_PASS = os.environ.get("INDEXER_PASS", "")
 

@@ -14,10 +14,11 @@ data/         runtime local do SQLite (ignorado no Git)
 `config.py` é local e fica fora do Git por conter credenciais do lab. Para uma
 nova máquina, copie `config.example.py` para `config.py` e preencha os tokens.
 
-## Rodar com Wazuh Indexer via SSH tunnel
+## Rodar local com Wazuh Indexer via SSH tunnel
 
 O Wazuh Indexer fica protegido dentro da VM em `localhost:9200`. No Windows/host,
-o SPARK acessa ele por um tunnel local em `https://localhost:19200`.
+quando o backend roda localmente, o SPARK acessa ele por um tunnel em
+`https://localhost:19200`.
 
 1. Ligue a VM Wazuh/Shuffle no VMware.
 2. Confirme que o host alcança a VM em `192.168.50.20` e que SSH responde na porta `22`.
@@ -46,19 +47,69 @@ Ou suba tunnel + Flask de uma vez:
 .\scripts\start-spark.ps1
 ```
 
-Defaults do lab VMware:
+Defaults do lab VMware quando o backend roda dentro da VM Wazuh/Shuffle:
 
 ```powershell
 $env:WAZUH_BASE="https://192.168.50.20:55000"
 $env:SHUFFLE_BASE_URL="http://192.168.50.20:3001"
 $env:SHUFFLE_BACKEND_URL="http://192.168.50.20:5001"
-$env:INDEXER_BASE="https://localhost:19200"
+$env:INDEXER_BASE="https://localhost:9200"
 ```
 
 Para encerrar o tunnel:
 
 ```powershell
 .\scripts\stop-indexer-tunnel.ps1
+```
+
+## Deploy no VMware Lab
+
+O Windows/VS Code é a fonte oficial do código. Não edite arquivos manualmente
+em `/opt/spark-soc` na VM Wazuh, porque isso deixa o ambiente fora do controle
+de versão.
+
+Arquitetura do lab:
+
+```text
+Windows host / navegador: 192.168.50.1
+Wazuh + Shuffle VM:      192.168.50.20
+Agent/client VM:         192.168.50.30
+FortiGate SOC IP:        192.168.50.254
+Dashboard:               http://192.168.50.20:5000
+Shuffle frontend:        http://192.168.50.20:3001
+Shuffle backend/API:     http://192.168.50.20:5001
+Wazuh API:               https://192.168.50.20:55000
+Wazuh Indexer na VM:     https://localhost:9200
+```
+
+Fluxo recomendado:
+
+1. Desenvolva e commite no Windows.
+2. Rode o deploy pelo PowerShell a partir da raiz do projeto:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-vmware.ps1
+```
+
+O script cria um `spark-soc.tar.gz` temporário, envia para
+`wazuh@192.168.50.20:/tmp/spark-soc.tar.gz`, reinstala `/opt/spark-soc` e
+reinicia o serviço `spark-soc`.
+
+O deploy preserva na VM:
+
+- `/opt/spark-soc/vendor`
+- `/opt/spark-soc/.env`
+- `/opt/spark-soc/config.py`
+
+Esses arquivos não são substituídos pelo pacote do Windows. Se a VM ainda não
+tiver `config.py`, o script cria um a partir de `config.example.py`.
+
+Se o `sudo` pedir senha, digite a senha do usuário `wazuh`. Se o serviço falhar,
+verifique na VM:
+
+```bash
+sudo systemctl status spark-soc --no-pager
+sudo journalctl -u spark-soc -n 100 --no-pager
 ```
 
 ## Executive Overview live
