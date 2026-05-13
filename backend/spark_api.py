@@ -1322,6 +1322,8 @@ def fortigate_blocklist():
 
 @spark_bp.route("/spark/block-ip", methods=["POST"])
 def block_ip():
+    return fortigate_block_ip()
+
     data    = request.get_json() or {}
     ip      = (data.get("ip") or "").strip()
     if not ip:
@@ -1435,6 +1437,8 @@ def block_ip():
 
 @spark_bp.route("/spark/unblock-ip", methods=["POST"])
 def unblock_ip():
+    return fortigate_unblock_ip()
+
     data    = request.get_json()
     ip      = (data.get("ip") or "").strip()
     if not ip:
