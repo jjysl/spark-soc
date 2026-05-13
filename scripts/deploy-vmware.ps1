@@ -25,6 +25,7 @@ Require-Command scp
 Require-Command ssh
 
 Set-Location $projectRoot
+$sshOptions = @("-o", "StrictHostKeyChecking=accept-new")
 
 if (Test-Path $ArchivePath) {
     Remove-Item -Force -LiteralPath $ArchivePath
@@ -50,7 +51,7 @@ Write-Host "[SPARK] Creating archive: $ArchivePath" -ForegroundColor Cyan
 & tar @excludeArgs -czf $ArchivePath -C $projectParent $projectName
 
 Write-Host "[SPARK] Uploading archive to ${SshUser}@${SshHost}:/tmp/spark-soc.tar.gz" -ForegroundColor Cyan
-& scp $ArchivePath "${SshUser}@${SshHost}:/tmp/spark-soc.tar.gz"
+& scp @sshOptions $ArchivePath "${SshUser}@${SshHost}:/tmp/spark-soc.tar.gz"
 
 $remoteScript = @'
 set -e
@@ -103,7 +104,7 @@ $remoteScript = $remoteScript.Replace('service_name="spark-soc"', "service_name=
 $remoteScript = $remoteScript.Replace('remote_root="/opt/spark-soc"', "remote_root=`"$RemoteRoot`"")
 
 Write-Host "[SPARK] Deploying on ${SshHost} and restarting $ServiceName" -ForegroundColor Cyan
-$remoteScript | ssh "${SshUser}@${SshHost}" "bash -s"
+$remoteScript | ssh @sshOptions "${SshUser}@${SshHost}" "bash -s"
 
 Write-Host "[SPARK] Testing dashboard from Windows host: http://${SshHost}:5000" -ForegroundColor Cyan
 try {

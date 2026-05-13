@@ -54,6 +54,7 @@ $env:WAZUH_BASE="https://192.168.50.20:55000"
 $env:SHUFFLE_BASE_URL="http://192.168.50.20:3001"
 $env:SHUFFLE_BACKEND_URL="http://192.168.50.20:5001"
 $env:INDEXER_BASE="https://localhost:9200"
+$env:FORTIGATE_BASE_URL="https://192.168.50.40"
 ```
 
 Para encerrar o tunnel:
@@ -74,7 +75,7 @@ Arquitetura do lab:
 Windows host / navegador: 192.168.50.1
 Wazuh + Shuffle VM:      192.168.50.20
 Agent/client VM:         192.168.50.30
-FortiGate SOC IP:        192.168.50.254
+FortiGate SOC IP:        192.168.50.40
 Dashboard:               http://192.168.50.20:5000
 Shuffle frontend:        http://192.168.50.20:3001
 Shuffle backend/API:     http://192.168.50.20:5001
@@ -103,6 +104,10 @@ O deploy preserva na VM:
 
 Esses arquivos não são substituídos pelo pacote do Windows. Se a VM ainda não
 tiver `config.py`, o script cria um a partir de `config.example.py`.
+
+A FortiGate API key deve ser configurada apenas no `.env` da VM em
+`/opt/spark-soc/.env`. Não coloque o token real no Git, README, `.env.example`
+ou `config.example.py`.
 
 Se o `sudo` pedir senha, digite a senha do usuário `wazuh`. Se o serviço falhar,
 verifique na VM:

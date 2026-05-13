@@ -16,5 +16,6 @@ $env:WAZUH_MANAGER_IP = if ($env:WAZUH_MANAGER_IP) { $env:WAZUH_MANAGER_IP } els
 $env:WAZUH_BASE = if ($env:WAZUH_BASE) { $env:WAZUH_BASE } else { "https://${SshHost}:55000" }
 $env:SHUFFLE_BASE_URL = if ($env:SHUFFLE_BASE_URL) { $env:SHUFFLE_BASE_URL } else { "http://${SshHost}:3001" }
 $env:SHUFFLE_BACKEND_URL = if ($env:SHUFFLE_BACKEND_URL) { $env:SHUFFLE_BACKEND_URL } else { "http://${SshHost}:5001" }
-$env:INDEXER_BASE = if ($env:INDEXER_BASE) { $env:INDEXER_BASE } else { "https://localhost:19200" }
+$env:INDEXER_BASE = if ($env:INDEXER_BASE) { $env:INDEXER_BASE } else { "https://localhost:9200" }
+$env:FORTIGATE_BASE_URL = if ($env:FORTIGATE_BASE_URL) { $env:FORTIGATE_BASE_URL } else { "https://192.168.50.40" }
 python backend/app.py
