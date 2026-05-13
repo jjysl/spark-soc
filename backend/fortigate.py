@@ -14,7 +14,7 @@ from requests import exceptions as request_exceptions
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 DEFAULT_BLOCKLIST_GROUP = "SPARK_BLOCKLIST"
-DEFAULT_BLOCKLIST_POLICY = "SPARK_BLOCKLIST_DENY"
+DEFAULT_BLOCKLIST_POLICY = "SPARK_AUTO_BLOCK"
 
 
 def _not_configured() -> dict:
@@ -157,6 +157,10 @@ def _object_name_for_ip(ip: str) -> str:
     return f"SPARK_BLOCK_{ip.replace('.', '_')}"
 
 
+def block_object_name(ip: str) -> str:
+    return _object_name_for_ip(ip)
+
+
 def _member_names(items) -> list[str]:
     names = []
     for item in _as_list(items):
@@ -276,6 +280,21 @@ def get_address_group(base_url: str, api_key: str, group_name: str = DEFAULT_BLO
     }
 
 
+def ensure_address_group(base_url: str, api_key: str, group_name: str = DEFAULT_BLOCKLIST_GROUP) -> dict:
+    try:
+        group = get_address_group(base_url, api_key, group_name)
+        return {**group, "created": False}
+    except Exception:
+        payload = {
+            "name": group_name,
+            "member": [],
+            "comment": "SPARK SOC automated containment blocklist",
+        }
+        response = _request("POST", base_url, "/api/v2/cmdb/firewall/addrgrp", api_key, json=payload, timeout=8)
+        response.raise_for_status()
+        return {"name": group_name, "members": [], "member_count": 0, "comment": payload["comment"], "created": True}
+
+
 def get_static_routes(base_url: str, api_key: str) -> list[dict]:
     """Return configured static routes from FortiOS CMDB API."""
     payload = _json_request("GET", base_url, "/api/v2/cmdb/router/static", api_key, timeout=8)
@@ -307,6 +326,56 @@ def get_policy_statistics(base_url: str, api_key: str) -> list[dict]:
         }
         for item in rows
     ]
+
+
+def get_firewall_policy_by_name(base_url: str, api_key: str, policy_name: str) -> dict | None:
+    payload = _json_request("GET", base_url, "/api/v2/cmdb/firewall/policy", api_key, timeout=8)
+    for item in _as_list(payload.get("results")):
+        if item.get("name") == policy_name:
+            return item
+    return None
+
+
+def ensure_block_policy(
+    base_url: str,
+    api_key: str,
+    group_name: str = DEFAULT_BLOCKLIST_GROUP,
+    policy_name: str = DEFAULT_BLOCKLIST_POLICY,
+    srcintf: str = "any",
+    dstintf: str = "any",
+) -> dict:
+    existing = get_firewall_policy_by_name(base_url, api_key, policy_name)
+    if existing:
+        return {
+            "present": True,
+            "created": False,
+            "policyid": existing.get("policyid") or existing.get("q_origin_key") or "",
+            "name": policy_name,
+        }
+
+    payload = {
+        "name": policy_name,
+        "srcintf": [{"name": srcintf}],
+        "dstintf": [{"name": dstintf}],
+        "srcaddr": [{"name": group_name}],
+        "dstaddr": [{"name": "all"}],
+        "action": "deny",
+        "schedule": "always",
+        "service": [{"name": "ALL"}],
+        "logtraffic": "all",
+        "status": "enable",
+        "comments": "SPARK SOC automated containment policy",
+    }
+    response = _request("POST", base_url, "/api/v2/cmdb/firewall/policy", api_key, json=payload, timeout=8)
+    response.raise_for_status()
+    body = response.json()
+    return {
+        "present": True,
+        "created": True,
+        "policyid": body.get("mkey") or body.get("serial") or "",
+        "name": policy_name,
+        "response": _summarize_response(response),
+    }
 
 
 def get_system_status(base_url: str, api_key: str) -> dict:
@@ -420,12 +489,37 @@ def add_ip_to_blocklist(
     group_name: str = DEFAULT_BLOCKLIST_GROUP,
     policy_name: str = DEFAULT_BLOCKLIST_POLICY,
 ) -> dict:
-    """Create/use a /32 address object and add it to the SPARK blocklist group."""
-    try:
-        ipaddress.IPv4Address(ip)
-    except ValueError:
-        return {"ok": False, "status": "invalid_ip", "message": "Invalid IPv4 address.", "ip": ip}
+    """Backward-compatible wrapper for the product block workflow."""
+    return block_ip(
+        base_url,
+        api_key,
+        ip,
+        reason="Legacy SPARK block action",
+        source="manual",
+        duration_minutes=None,
+        severity="medium",
+        incident_id="",
+        group_name=group_name,
+        policy_name=policy_name,
+        srcintf="any",
+        dstintf="any",
+    )
 
+
+def block_ip(
+    base_url: str,
+    api_key: str,
+    ip: str,
+    reason: str,
+    source: str,
+    duration_minutes: int | None,
+    severity: str,
+    incident_id: str = "",
+    group_name: str = DEFAULT_BLOCKLIST_GROUP,
+    policy_name: str = DEFAULT_BLOCKLIST_POLICY,
+    srcintf: str = "any",
+    dstintf: str = "any",
+) -> dict:
     object_name = _object_name_for_ip(ip)
     evidence = {
         "ok": False,
@@ -434,32 +528,53 @@ def add_ip_to_blocklist(
         "object": object_name,
         "group": group_name,
         "policy": policy_name,
-        "object_created": False,
-        "object_existed": False,
+        "object_created_or_updated": False,
         "group_updated": False,
         "already_member": False,
-        "policy_found": False,
-        "enforcement_path": "pending network routing validation",
+        "policy_present": False,
+        "policy_created": False,
+        "api_responses": {},
         "message": "",
+        "enforcement_path": "FortiGate deny policy using SPARK_BLOCKLIST; runtime impact depends on traffic path.",
     }
+    timestamp = _utc_now()
+    comment = " | ".join([
+        "SPARK SOC",
+        reason or "No reason provided",
+        source or "manual",
+        timestamp,
+        f"duration={duration_minutes or 0}m",
+        f"severity={severity or 'medium'}",
+        f"incident={incident_id}" if incident_id else "incident=",
+    ])
 
     try:
+        status = get_resource_usage(base_url, api_key)
+        if status.get("source") != "fortigate-live":
+            evidence.update({"status": status.get("status", "fortigate_offline"), "message": status.get("error") or status.get("message", "")})
+            return evidence
+
+        address_payload = {
+            "name": object_name,
+            "type": "ipmask",
+            "subnet": f"{ip} 255.255.255.255",
+            "comment": comment[:255],
+        }
+        existed = True
         try:
             _json_request("GET", base_url, f"/api/v2/cmdb/firewall/address/{object_name}", api_key, timeout=8)
-            evidence["object_existed"] = True
+            response = _request("PUT", base_url, f"/api/v2/cmdb/firewall/address/{object_name}", api_key, json=address_payload, timeout=8)
         except Exception:
-            payload = {
-                "name": object_name,
-                "subnet": f"{ip} 255.255.255.255",
-                "comment": "Blocked by SPARK SOC",
-            }
-            created = _request("POST", base_url, "/api/v2/cmdb/firewall/address", api_key, json=payload, timeout=8)
-            if not created.ok:
-                evidence.update({"status": f"http_{created.status_code}", "message": created.text[:500]})
-                return evidence
-            evidence["object_created"] = True
+            existed = False
+            response = _request("POST", base_url, "/api/v2/cmdb/firewall/address", api_key, json=address_payload, timeout=8)
+        if not response.ok:
+            evidence.update({"status": "object_create_failed", "message": response.text[:500]})
+            return evidence
+        evidence["object_created_or_updated"] = True
+        evidence["object_existed"] = existed
+        evidence["api_responses"]["address_object"] = _summarize_response(response)
 
-        group = get_address_group(base_url, api_key, group_name)
+        group = ensure_address_group(base_url, api_key, group_name)
         members = group.get("members", [])
         if object_name in members:
             evidence["already_member"] = True
@@ -474,21 +589,79 @@ def add_ip_to_blocklist(
                 timeout=8,
             )
             if not response.ok:
-                evidence.update({"status": f"http_{response.status_code}", "message": response.text[:500]})
+                evidence.update({"status": "group_update_failed", "message": response.text[:500]})
                 return evidence
             evidence["group_updated"] = True
+            evidence["api_responses"]["address_group"] = _summarize_response(response)
 
-        policies = get_firewall_policies(base_url, api_key)
-        evidence["policy_found"] = any(policy.get("name") == policy_name for policy in policies)
+        try:
+            policy = ensure_block_policy(base_url, api_key, group_name, policy_name, srcintf, dstintf)
+        except Exception as exc:
+            status = _error_state(exc, "/api/v2/cmdb/firewall/policy")
+            evidence.update({"status": "policy_create_failed", "message": status.get("error", "")})
+            return evidence
+        evidence["policy_present"] = bool(policy.get("present"))
+        evidence["policy_created"] = bool(policy.get("created"))
+        evidence["policyid"] = policy.get("policyid", "")
+        if policy.get("response"):
+            evidence["api_responses"]["policy"] = policy["response"]
+
         evidence["ok"] = True
-        evidence["status"] = "success"
-        evidence["message"] = (
-            "IP added to FortiGate blocklist via FortiOS REST API. "
-            "Runtime enforcement pending network routing validation."
-        )
+        evidence["status"] = "blocked"
+        evidence["message"] = "IP added to FortiGate blocklist and deny policy is present."
         return evidence
     except Exception as exc:
-        evidence.update({"status": "error", "message": str(exc)})
+        status = _error_state(exc, "/api/v2/cmdb/firewall/address")
+        evidence.update({"status": status.get("status", "endpoint_error"), "message": status.get("error", "")})
+        return evidence
+
+
+def unblock_ip(base_url: str, api_key: str, ip: str, group_name: str = DEFAULT_BLOCKLIST_GROUP, delete_object: bool = True) -> dict:
+    object_name = _object_name_for_ip(ip)
+    evidence = {
+        "ok": False,
+        "status": "pending",
+        "ip": ip,
+        "object": object_name,
+        "group": group_name,
+        "removed_from_group": False,
+        "object_deleted": False,
+        "api_responses": {},
+        "message": "",
+    }
+    try:
+        group = ensure_address_group(base_url, api_key, group_name)
+        members = [name for name in group.get("members", []) if name != object_name]
+        if len(members) != len(group.get("members", [])):
+            response = _request(
+                "PUT",
+                base_url,
+                f"/api/v2/cmdb/firewall/addrgrp/{group_name}",
+                api_key,
+                json={"member": [{"name": name} for name in members]},
+                timeout=8,
+            )
+            if not response.ok:
+                evidence.update({"status": "unblock_failed", "message": response.text[:500]})
+                return evidence
+            evidence["removed_from_group"] = True
+            evidence["api_responses"]["address_group"] = _summarize_response(response)
+
+        if delete_object:
+            response = _request("DELETE", base_url, f"/api/v2/cmdb/firewall/address/{object_name}", api_key, timeout=8)
+            if response.ok or response.status_code == 404:
+                evidence["object_deleted"] = response.ok
+                evidence["api_responses"]["address_object"] = _summarize_response(response)
+            else:
+                evidence["object_delete_error"] = response.text[:500]
+
+        evidence["ok"] = True
+        evidence["status"] = "unblocked"
+        evidence["message"] = "IP removed from FortiGate blocklist."
+        return evidence
+    except Exception as exc:
+        status = _error_state(exc, f"/api/v2/cmdb/firewall/addrgrp/{group_name}")
+        evidence.update({"status": "unblock_failed" if status["status"] == "endpoint_error" else status["status"], "message": status.get("error", "")})
         return evidence
 
 
@@ -506,3 +679,46 @@ def delete_address_object(base_url: str, api_key: str, ip: str) -> str:
         return "ok" if response.ok else f"http_{response.status_code}"
     except Exception as exc:
         return f"offline ({type(exc).__name__})"
+
+
+def list_blocklist(base_url: str, api_key: str, group_name: str = DEFAULT_BLOCKLIST_GROUP) -> dict:
+    group = ensure_address_group(base_url, api_key, group_name)
+    objects = {item.get("name"): item for item in get_address_objects(base_url, api_key)}
+    items = []
+    for name in group.get("members", []):
+        item = objects.get(name, {})
+        subnet = str(item.get("subnet", ""))
+        ip = subnet.split()[0] if subnet else ""
+        items.append({
+            "ip": ip,
+            "object_name": name,
+            "reason": item.get("comment", ""),
+            "comment": item.get("comment", ""),
+            "created_at": "",
+            "source": "",
+            "present": True,
+            "status": "blocked",
+        })
+    return {"status": "success", "group_name": group_name, "items": items}
+
+
+def _summarize_response(response: requests.Response) -> dict:
+    content_type = response.headers.get("content-type", "")
+    body = {}
+    if "json" in content_type:
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+    return {
+        "status_code": response.status_code,
+        "ok": response.ok,
+        "status": body.get("status", ""),
+        "mkey": body.get("mkey", ""),
+        "message": body.get("message", "") or body.get("error", ""),
+    }
+
+
+def _utc_now() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()

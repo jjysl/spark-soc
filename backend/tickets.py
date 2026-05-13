@@ -348,7 +348,7 @@ def record_action_event(case_id: str = "", ticket_id: str = "", action: str = ""
         "created_at": created_at,
     }
     conn = _db()
-    conn.execute(
+    cursor = conn.execute(
         """
         INSERT INTO case_action_events (
             case_id, ticket_id, action, status, ip, object_name, group_name,
@@ -372,6 +372,7 @@ def record_action_event(case_id: str = "", ticket_id: str = "", action: str = ""
             created_at,
         ),
     )
+    event["id"] = cursor.lastrowid
     conn.commit()
     conn.close()
     return event

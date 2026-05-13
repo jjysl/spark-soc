@@ -109,6 +109,37 @@ A FortiGate API key deve ser configurada apenas no `.env` da VM em
 `/opt/spark-soc/.env`. Não coloque o token real no Git, README, `.env.example`
 ou `config.example.py`.
 
+Para contenção via FortiGate, o SPARK usa por padrão:
+
+```text
+FORTIGATE_BLOCKLIST_GROUP=SPARK_BLOCKLIST
+FORTIGATE_BLOCKLIST_POLICY=SPARK_AUTO_BLOCK
+FORTIGATE_BLOCK_SRCINTF=any
+FORTIGATE_BLOCK_DSTINTF=any
+```
+
+Teste manual de bloqueio:
+
+```bash
+curl -X POST http://192.168.50.20:5000/spark/fortigate/block-ip \
+  -H "Content-Type: application/json" \
+  -d '{"ip":"10.255.255.124","reason":"Manual SOC containment test","source":"manual","severity":"high"}'
+```
+
+Listar bloqueios:
+
+```bash
+curl http://192.168.50.20:5000/spark/fortigate/blocklist
+```
+
+Teste manual de desbloqueio:
+
+```bash
+curl -X POST http://192.168.50.20:5000/spark/fortigate/unblock-ip \
+  -H "Content-Type: application/json" \
+  -d '{"ip":"10.255.255.124","reason":"Test cleanup"}'
+```
+
 Se o `sudo` pedir senha, digite a senha do usuário `wazuh`. Se o serviço falhar,
 verifique na VM:
 

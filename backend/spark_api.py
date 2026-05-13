@@ -5,6 +5,7 @@ Todos os endpoints do dashboard agrupados num Blueprint Flask.
 """
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime, timezone
+import ipaddress
 import json
 import time
 
@@ -20,6 +21,7 @@ EXECUTIVE_RANGES = {"1h", "6h", "24h", "7d", "30d"}
 SLA_POLICY_MINUTES = {"P1": 15, "P2": 45, "P3": 90, "P4": 360}
 EXECUTIVE_CACHE_TTL_SECONDS = 20
 _executive_cache: dict[str, tuple[float, dict]] = {}
+PROTECTED_BLOCK_IPS = {"127.0.0.1", "0.0.0.0", "192.168.50.1", "192.168.50.20", "192.168.50.30", "192.168.50.40"}
 
 
 def _parse_wazuh_timestamp(value: str) -> datetime | None:
@@ -35,6 +37,39 @@ def _parse_wazuh_timestamp(value: str) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _validate_block_ip(raw_ip: str) -> tuple[str | None, tuple[dict, int] | None]:
+    ip = (raw_ip or "").strip()
+    if not ip:
+        return None, ({"status": "invalid_ip", "message": "IP is required."}, 400)
+    try:
+        parsed = ipaddress.IPv4Address(ip)
+    except ValueError:
+        return None, ({"status": "invalid_ip", "message": "Only valid IPv4 addresses are accepted.", "ip": ip}, 400)
+    text = str(parsed)
+    if text in PROTECTED_BLOCK_IPS:
+        return None, ({"status": "protected_ip", "message": "Protected lab/control-plane IP cannot be blocked.", "ip": text}, 400)
+    return text, None
+
+
+def _block_config() -> dict:
+    return {
+        "group_name": getattr(config, "FORTIGATE_BLOCKLIST_GROUP", "SPARK_BLOCKLIST"),
+        "policy_name": getattr(config, "FORTIGATE_BLOCKLIST_POLICY", "SPARK_AUTO_BLOCK"),
+        "srcintf": getattr(config, "FORTIGATE_BLOCK_SRCINTF", "any"),
+        "dstintf": getattr(config, "FORTIGATE_BLOCK_DSTINTF", "any"),
+    }
+
+
+def _record_fortigate_evidence(action: str, status: str, payload: dict, case_id: str = "", ticket_id: str = "") -> dict:
+    return ticket_store.record_action_event(
+        case_id=case_id,
+        ticket_id=ticket_id,
+        action=action,
+        status=status,
+        payload=payload,
+    )
 
 
 def _fmt_minutes(minutes: int) -> str:
@@ -1090,6 +1125,201 @@ def incident_case_action(case_id):
     return jsonify({"case": updated_case, "action": event, "message": message})
 
 
+@spark_bp.route("/spark/fortigate/block-ip", methods=["POST"])
+def fortigate_block_ip():
+    data = request.get_json() or {}
+    ip, error = _validate_block_ip(data.get("ip", ""))
+    if error:
+        payload, status_code = error
+        return jsonify(payload), status_code
+
+    block_cfg = _block_config()
+    reason = (data.get("reason") or "Analyst requested containment").strip()
+    source = (data.get("source") or "manual").strip().lower()
+    if source not in {"manual", "shuffle", "wazuh", "demo"}:
+        source = "manual"
+    severity = (data.get("severity") or "medium").strip().lower()
+    if severity not in {"low", "medium", "high", "critical"}:
+        severity = "medium"
+    try:
+        duration_minutes = int(data.get("duration_minutes", 60))
+    except (TypeError, ValueError):
+        duration_minutes = 60
+    incident_id = (data.get("incident_id") or data.get("case_id") or data.get("caseId") or "").strip()
+    ticket_id = (data.get("ticket_id") or data.get("ticketId") or "").strip()
+
+    fg_result = fortigate.block_ip(
+        config.FORTIGATE_BASE_URL,
+        config.FORTIGATE_API_KEY,
+        ip,
+        reason,
+        source,
+        duration_minutes,
+        severity,
+        incident_id,
+        block_cfg["group_name"],
+        block_cfg["policy_name"],
+        block_cfg["srcintf"],
+        block_cfg["dstintf"],
+    )
+    evidence_payload = {
+        **fg_result,
+        "action": "block",
+        "reason": reason,
+        "source": source,
+        "severity": severity,
+        "incident_id": incident_id,
+        "duration_minutes": duration_minutes,
+        "fortigate_object": fg_result.get("object", ""),
+        "fortigate_group": block_cfg["group_name"],
+        "fortigate_policy": block_cfg["policy_name"],
+        "api_responses": fg_result.get("api_responses", {}),
+    }
+    event = _record_fortigate_evidence(
+        "fortigate_block_ip",
+        "success" if fg_result.get("ok") else "failed",
+        evidence_payload,
+        case_id=incident_id,
+        ticket_id=ticket_id,
+    )
+    if fg_result.get("ok"):
+        ticket_store.block_ip(ip, "", reason, source)
+        return jsonify({
+            "status": "blocked",
+            "ip": ip,
+            "reason": reason,
+            "object_name": fg_result.get("object", ""),
+            "group_name": block_cfg["group_name"],
+            "policy_name": block_cfg["policy_name"],
+            "evidence_id": event.get("id") or event.get("created_at", ""),
+            "fortigate": {
+                "object_created_or_updated": bool(fg_result.get("object_created_or_updated")),
+                "group_updated": bool(fg_result.get("group_updated") or fg_result.get("already_member")),
+                "policy_present": bool(fg_result.get("policy_present")),
+                "policy_created": bool(fg_result.get("policy_created")),
+            },
+            "evidence": event,
+        })
+
+    status_map = {
+        "invalid_ip": 400,
+        "protected_ip": 400,
+        "not_configured": 503,
+        "auth_failed": 401,
+        "timeout": 504,
+        "parse_error": 502,
+        "fortigate_offline": 503,
+        "object_create_failed": 502,
+        "group_update_failed": 502,
+        "policy_create_failed": 502,
+    }
+    return jsonify({
+        "status": fg_result.get("status", "endpoint_error"),
+        "ip": ip,
+        "reason": reason,
+        "message": fg_result.get("message", "FortiGate block failed."),
+        "object_name": fg_result.get("object", ""),
+        "group_name": block_cfg["group_name"],
+        "policy_name": block_cfg["policy_name"],
+        "evidence_id": event.get("id") or event.get("created_at", ""),
+        "fortigate": fg_result,
+        "evidence": event,
+    }), status_map.get(fg_result.get("status"), 502)
+
+
+@spark_bp.route("/spark/fortigate/unblock-ip", methods=["POST"])
+def fortigate_unblock_ip():
+    data = request.get_json() or {}
+    ip, error = _validate_block_ip(data.get("ip", ""))
+    if error:
+        payload, status_code = error
+        return jsonify(payload), status_code
+
+    block_cfg = _block_config()
+    reason = (data.get("reason") or "Analyst requested unblock").strip()
+    incident_id = (data.get("incident_id") or data.get("case_id") or data.get("caseId") or "").strip()
+    ticket_id = (data.get("ticket_id") or data.get("ticketId") or "").strip()
+    fg_result = fortigate.unblock_ip(
+        config.FORTIGATE_BASE_URL,
+        config.FORTIGATE_API_KEY,
+        ip,
+        block_cfg["group_name"],
+        delete_object=True,
+    )
+    evidence_payload = {
+        **fg_result,
+        "action": "unblock",
+        "reason": reason,
+        "incident_id": incident_id,
+        "fortigate_object": fg_result.get("object", ""),
+        "fortigate_group": block_cfg["group_name"],
+        "fortigate_policy": block_cfg["policy_name"],
+        "api_responses": fg_result.get("api_responses", {}),
+    }
+    event = _record_fortigate_evidence(
+        "fortigate_unblock_ip",
+        "success" if fg_result.get("ok") else "failed",
+        evidence_payload,
+        case_id=incident_id,
+        ticket_id=ticket_id,
+    )
+    if fg_result.get("ok"):
+        ticket_store.unblock_ip(ip, "", "SOC")
+        return jsonify({
+            "status": "unblocked",
+            "ip": ip,
+            "reason": reason,
+            "object_name": fg_result.get("object", ""),
+            "group_name": block_cfg["group_name"],
+            "evidence_id": event.get("id") or event.get("created_at", ""),
+            "fortigate": fg_result,
+            "evidence": event,
+        })
+    status_code = 401 if fg_result.get("status") == "auth_failed" else 504 if fg_result.get("status") == "timeout" else 502
+    return jsonify({
+        "status": fg_result.get("status", "unblock_failed"),
+        "ip": ip,
+        "reason": reason,
+        "message": fg_result.get("message", "FortiGate unblock failed."),
+        "object_name": fg_result.get("object", ""),
+        "group_name": block_cfg["group_name"],
+        "evidence_id": event.get("id") or event.get("created_at", ""),
+        "fortigate": fg_result,
+        "evidence": event,
+    }), status_code
+
+
+@spark_bp.route("/spark/fortigate/blocklist")
+def fortigate_blocklist():
+    block_cfg = _block_config()
+    try:
+        fg_result = fortigate.list_blocklist(
+            config.FORTIGATE_BASE_URL,
+            config.FORTIGATE_API_KEY,
+            block_cfg["group_name"],
+        )
+    except Exception as exc:
+        return jsonify({"status": "endpoint_error", "message": str(exc), "items": []}), 502
+
+    events = ticket_store.list_action_events(limit=500)
+    latest_by_ip = {}
+    for event in events:
+        payload = event.get("payload", {})
+        ip = payload.get("ip") or event.get("ip")
+        if ip and ip not in latest_by_ip:
+            latest_by_ip[ip] = event
+    for item in fg_result.get("items", []):
+        event = latest_by_ip.get(item.get("ip"), {})
+        payload = event.get("payload", {}) if event else {}
+        item["reason"] = payload.get("reason") or item.get("reason", "")
+        item["created_at"] = event.get("created_at", "")
+        item["source"] = payload.get("source", "")
+        item["severity"] = payload.get("severity", "")
+        item["incident_id"] = payload.get("incident_id", "")
+        item["evidence_status"] = event.get("status", "")
+    return jsonify(fg_result)
+
+
 @spark_bp.route("/spark/block-ip", methods=["POST"])
 def block_ip():
     data    = request.get_json() or {}
@@ -1103,7 +1333,7 @@ def block_ip():
     case_id  = data.get("case_id", "") or data.get("caseId", "")
     ticket_id = data.get("ticket_id", "") or data.get("ticketId", "")
     group_name = getattr(config, "FORTIGATE_BLOCKLIST_GROUP", "SPARK_BLOCKLIST")
-    policy_name = getattr(config, "FORTIGATE_BLOCKLIST_POLICY", "SPARK_BLOCKLIST_DENY")
+    policy_name = getattr(config, "FORTIGATE_BLOCKLIST_POLICY", "SPARK_AUTO_BLOCK")
     fg_result = fortigate.add_ip_to_blocklist(
         config.FORTIGATE_BASE_URL,
         config.FORTIGATE_API_KEY,
