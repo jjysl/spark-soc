@@ -1,0 +1,7 @@
+/* Product dashboard tokens live here during the migration away from dashboard.html inline CSS. */
+:root{
+  --spark-radius-sm:4px;
+  --spark-radius-md:6px;
+  --spark-radius-lg:8px;
+  --spark-focus:0 0 0 3px rgba(26,86,219,.16);
+}

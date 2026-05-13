@@ -1,0 +1,18 @@
+.toast-stack{position:fixed;right:18px;bottom:18px;z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:360px}
+.toast{position:relative;background:#fff;border:1px solid var(--border);border-left:4px solid var(--blue);box-shadow:var(--sh);border-radius:8px;padding:10px 34px 10px 12px}
+.toast-success{border-left-color:var(--green)}.toast-error{border-left-color:var(--red)}.toast-warn{border-left-color:var(--amber)}
+.toast-title{font-size:12px;font-weight:700;color:var(--t1)}.toast-message{font-size:11px;color:var(--t2);margin-top:2px}
+.toast-close{position:absolute;right:8px;top:7px;border:0;background:transparent;color:var(--tm);cursor:pointer;font-size:12px}
+.empty-state,.loading-state,.error-state{display:flex;gap:10px;align-items:flex-start}
+.empty-title{font-size:12px;color:var(--t1);font-weight:600;margin-bottom:4px}.empty-detail{font-size:11px;color:var(--tm)}
+.error-state{border-color:#fecaca;background:#fef2f2}.loading-state{background:#f8fafc}
+.modal-backdrop,.drawer-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.34);z-index:9998;display:flex;align-items:center;justify-content:center;padding:18px}
+.modal-panel{width:min(560px,100%);background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 20px 60px rgba(15,23,42,.24)}
+.drawer-panel{margin-left:auto;width:min(520px,100%);height:100%;background:#fff;border-left:1px solid var(--border);box-shadow:-12px 0 38px rgba(15,23,42,.18)}
+.modal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border)}
+.modal-body{padding:16px}.modal-footer{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--border);background:#fafbfc}
+.form-stack{display:flex;flex-direction:column;gap:8px}.form-stack label{font-size:10px;font-weight:700;text-transform:uppercase;color:var(--tm);letter-spacing:.07em}
+.form-input{font-family:'Inter',sans-serif;border:1px solid var(--border-s);border-radius:6px;padding:8px 10px;color:var(--t1);background:#fff}
+.form-input:focus{outline:none;box-shadow:var(--spark-focus);border-color:var(--blue)}
+.containment-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.compliance-disclaimer{font-size:11px;color:var(--t2);border-top:1px solid var(--border);padding:11px 14px;background:#fafbfc}

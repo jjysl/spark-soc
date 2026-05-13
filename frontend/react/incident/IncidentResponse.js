@@ -2,6 +2,9 @@
   const {useEffect, useMemo, useState} = React;
   const h = React.createElement;
   const RANGES = ['1h', '6h', '24h', '7d', '30d'];
+  const api = window.SparkApi || {};
+  const components = window.SparkComponents || {};
+  const hooks = window.SparkHooks || {};
 
   function fmtNum(value) {
     return Number(value || 0).toLocaleString('en-US');
@@ -16,6 +19,7 @@
   }
 
   function KpiCard({label, value, detail, critical, tone}) {
+    if (components.MetricCard) return h(components.MetricCard, {label, value, detail, critical, tone});
     return h('div', {className: `kpi ${critical ? 'ka' : ''}`},
       h('div', {className: 'kl'}, label),
       h('div', {className: 'kv', style: tone ? {color: `var(--${tone})`} : null}, value),
@@ -34,6 +38,7 @@
   }
 
   function SourceChip({label, ok}) {
+    if (components.SourceChip) return h(components.SourceChip, {label, ok});
     return h('span', {className: `source-chip ${ok ? 'ok' : 'warn'}`},
       h('span', {className: 'source-dot'}),
       `${label} ${ok ? 'Online' : 'Offline'}`
@@ -41,6 +46,7 @@
   }
 
   function EmptyState({title, detail}) {
+    if (components.EmptyState) return h(components.EmptyState, {title, detail});
     return h('div', {className: 'cb'},
       h('div', {style: {fontSize: 12, color: 'var(--t1)', fontWeight: 600, marginBottom: 4}}, title),
       h('div', {style: {fontSize: 11, color: 'var(--tm)'}}, detail)
@@ -82,11 +88,12 @@
                   disabled: actionState === `case:${item.document_id || item.rule_id}`,
                   onClick: () => onCreateCase(item),
                 }, actionState === `case:${item.document_id || item.rule_id}` ? 'Creating...' : 'Create Case'),
-                caseIp(item) ? h('button', {
+                caseIp(item) ? h(components.ActionButton || 'button', {
                   className: 'btn',
+                  loading: actionState === `block:${caseIp(item)}`,
                   disabled: actionState === `block:${caseIp(item)}`,
                   onClick: () => onBlock(item),
-                }, actionState === `block:${caseIp(item)}` ? 'Blocking...' : 'Block IP') : null
+                }, 'Block IP') : null
               )
             )
           ))
@@ -183,7 +190,7 @@
             h('div', {className: 'row-actions'},
               h('button', {className: 'btn', disabled: busy, onClick: () => onCaseAction(item, 'assign')}, 'Assign to Me'),
               h('button', {className: 'btn', disabled: busy, onClick: () => onCaseAction(item, 'start')}, 'Start Investigation'),
-              ip ? h('button', {className: 'btn', disabled: actionState === `block:${id}`, onClick: () => onBlock(item)}, actionState === `block:${id}` ? 'Blocking...' : 'Block IP') : null,
+              ip ? h(components.ActionButton || 'button', {className: 'btn', loading: actionState === `block:${id}`, disabled: actionState === `block:${id}`, onClick: () => onBlock(item)}, 'Block IP') : null,
               h('button', {className: 'btn', disabled: busy, onClick: () => onCaseAction(item, 'escalate')}, 'Escalate'),
               h('button', {className: 'btn btnp', disabled: busy, onClick: () => onCaseAction(item, 'close')}, 'Close Case')
             )
@@ -268,13 +275,13 @@
     const [loading, setLoading] = useState(false);
     const [actionState, setActionState] = useState('');
     const [updatedAt, setUpdatedAt] = useState(null);
+    const [lastEvidence, setLastEvidence] = useState(null);
+    const toast = hooks.useToast ? hooks.useToast() : {pushToast: () => {}};
 
     async function load() {
       setLoading(true);
       try {
-        const response = await fetch(`/spark/incident-response?range=${encodeURIComponent(range)}`, {credentials: 'include'});
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const payload = await response.json();
+        const payload = await api.incidents.getIncidentResponse(range);
         setData(payload);
         setUpdatedAt(new Date());
         setError('');
@@ -303,19 +310,12 @@
       const key = item.document_id || item.rule_id || item.timestamp || 'manual';
       setActionState(`case:${key}`);
       try {
-        const response = await fetch('/spark/incident-cases', {
-          method: 'POST',
-          credentials: 'include',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(item),
-        });
-        if (!response.ok) {
-          const payload = await response.json().catch(() => ({}));
-          throw new Error(payload.error || `HTTP ${response.status}`);
-        }
+        await api.incidents.createCase(item);
+        toast.pushToast({tone: 'success', title: 'Case created', message: caseTitle(item)});
         await load();
       } catch (err) {
         setError(`Case creation failed: ${err.message}`);
+        toast.pushToast({tone: 'error', title: 'Case creation failed', message: err.message});
       } finally {
         setActionState('');
       }
@@ -326,24 +326,17 @@
       if (!id) return;
       setActionState(`${action}:${id}`);
       try {
-        const response = await fetch(`/spark/incident-cases/${encodeURIComponent(id)}/action`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            action,
-            analyst: 'SOC Analyst',
-            to: 'SOC Manager',
-            reason: `${item.priority || 'P3'} case requires manager review`,
-          }),
+        await api.incidents.runCaseAction(id, {
+          action,
+          analyst: 'SOC Analyst',
+          to: 'SOC Manager',
+          reason: `${item.priority || 'P3'} case requires manager review`,
         });
-        if (!response.ok) {
-          const payload = await response.json().catch(() => ({}));
-          throw new Error(payload.error || `HTTP ${response.status}`);
-        }
+        toast.pushToast({tone: 'success', title: 'Case updated', message: `${id} - ${action}`});
         await load();
       } catch (err) {
         setError(`Case action failed: ${err.message}`);
+        toast.pushToast({tone: 'error', title: 'Case action failed', message: err.message});
       } finally {
         setActionState('');
       }
@@ -355,26 +348,24 @@
       const caseId = item.case_id || item.caseId || item.id || '';
       setActionState(`block:${caseId || ip}`);
       try {
-        const response = await fetch('/spark/block-ip', {
-          method: 'POST',
-          credentials: 'include',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            ip,
-            reason: caseTitle(item) || item.rule_id || 'Incident candidate',
-            title: caseTitle(item),
-            priority: item.priority || '',
-            analyst: 'SOC Analyst',
-            case_id: caseId || item.document_id || item.rule_id || '',
-          }),
+        const payload = await api.fortigate.blockIp({
+          ip,
+          reason: caseTitle(item) || item.rule_id || 'Incident candidate',
+          source: 'manual',
+          severity: String(item.priority || '').toUpperCase() === 'P1' ? 'critical' : 'high',
+          duration_minutes: 60,
+          incident_id: caseId || item.document_id || item.rule_id || '',
         });
-        if (!response.ok) {
-          const payload = await response.json().catch(() => ({}));
-          throw new Error(payload.message || `HTTP ${response.status}`);
-        }
+        setLastEvidence(payload);
+        toast.pushToast({
+          tone: 'success',
+          title: 'FortiGate block applied',
+          message: `${payload.ip} -> ${payload.object_name || 'SPARK_BLOCK object'} | evidence ${payload.evidence_id || '--'}`,
+        });
         await load();
       } catch (err) {
         setError(`FortiGate blocklist update failed: ${err.message}`);
+        toast.pushToast({tone: 'error', title: 'FortiGate block failed', message: err.message});
       } finally {
         setActionState('');
       }
@@ -419,6 +410,8 @@
         h(SourceChip, {label: 'Wazuh Indexer', ok: wazuhOk}),
         h(SourceChip, {label: 'Shuffle', ok: shuffleOk})
       ),
+      h(components.LoadingState && loading && !data ? components.LoadingState : React.Fragment, loading && !data ? {title: 'Loading response telemetry', detail: 'Collecting candidates, cases, and action evidence.'} : null),
+      lastEvidence && window.SparkIncident?.EvidencePanel ? h(window.SparkIncident.EvidencePanel, {evidence: lastEvidence}) : null,
       h('div', {className: 'g4'},
         h(KpiCard, {label: 'Incident Candidates', value: fmtNum(candidates.length), detail: `<span class="up">${fmtNum(payload.wazuh?.total)}</span> Wazuh alerts in range`, critical: candidates.length > 0}),
         h(KpiCard, {label: 'P1 Candidates', value: fmtNum(counts.p1), detail: 'Wazuh level >= 12'}),
@@ -440,5 +433,8 @@
   }
 
   const root = document.getElementById('incident-root');
-  if (root) ReactDOM.createRoot(root).render(h(IncidentResponseApp));
+  if (root) {
+    const ToastProvider = components.ToastProvider || React.Fragment;
+    ReactDOM.createRoot(root).render(h(ToastProvider, null, h(IncidentResponseApp)));
+  }
 })();

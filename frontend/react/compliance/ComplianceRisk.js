@@ -2,6 +2,7 @@
   const {useEffect, useMemo, useState} = React;
   const h = React.createElement;
   const RANGES = ['24h', '7d', '30d'];
+  const api = window.SparkApi || {};
 
   function fmtNum(value) {
     return Number(value || 0).toLocaleString('en-US');
@@ -57,7 +58,6 @@
     const base = Math.min(100, 35 + Math.min(30, activeRatio) + Math.min(25, payload.total_findings ? 15 : 0));
     return [
       {label: 'ISO 27001', value: Math.min(96, base + Math.min(12, evidence.sca + evidence.fim)), detail: 'A.8 / A.12 / A.16 evidence'},
-      {label: 'PCI DSS 4.0', value: Math.min(92, base + Math.min(10, evidence.audit + evidence.vuln)), detail: 'Req. 10 / 11 monitoring'},
       {label: 'LGPD / GDPR', value: Math.min(94, base + Math.min(10, evidence.fim + evidence.audit)), detail: 'Art. 46 security controls'},
       {label: 'NIST CSF 2.0', value: Math.min(93, base + Math.min(12, evidence.sca + evidence.rootcheck)), detail: 'Detect / Protect / Respond'},
     ];
@@ -248,9 +248,7 @@
     async function load() {
       setLoading(true);
       try {
-        const response = await fetch(`/spark/compliance-risk?range=${encodeURIComponent(range)}`, {credentials: 'include'});
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const payload = await response.json();
+        const payload = await api.compliance.getComplianceRisk(range);
         setData(payload);
         setUpdatedAt(new Date());
         setError('');
@@ -348,6 +346,7 @@
         h(FindingTable, {items: payload.findings || []}),
         h(MissingMappings, {notes: payload.notes || {}})
       ),
+      window.SparkCompliance?.ComplianceEvidenceTable ? h(window.SparkCompliance.ComplianceEvidenceTable, {rows: []}) : null,
       h(AssetRiskSegments, {payload})
     );
   }

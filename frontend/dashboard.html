@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SPARK SOC — NG-SOC as a Service · powered by Fortinet</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/src/styles/tokens.css">
+<link rel="stylesheet" href="/src/styles/components.css">
+<link rel="stylesheet" href="/src/styles/dashboard.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -553,6 +556,27 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
 <script src="/js/exec.js"></script>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="/src/api/client.js"></script>
+<script src="/src/api/fortigate.js"></script>
+<script src="/src/api/incidents.js"></script>
+<script src="/src/api/integrations.js"></script>
+<script src="/src/api/compliance.js"></script>
+<script src="/src/components/common/ToastProvider.js"></script>
+<script src="/src/hooks/useToast.js"></script>
+<script src="/src/hooks/useAsyncAction.js"></script>
+<script src="/src/hooks/useLiveData.js"></script>
+<script src="/src/components/common/MetricCard.js"></script>
+<script src="/src/components/common/StatusBadge.js"></script>
+<script src="/src/components/common/States.js"></script>
+<script src="/src/components/common/ActionButton.js"></script>
+<script src="/src/components/common/Modal.js"></script>
+<script src="/src/components/common/Drawer.js"></script>
+<script src="/src/components/incident/BlockIpModal.js"></script>
+<script src="/src/components/incident/EvidencePanel.js"></script>
+<script src="/src/components/incident/ResponseActionLog.js"></script>
+<script src="/src/components/incident/ContainmentStatus.js"></script>
+<script src="/src/components/integrations/IntegrationHealthCard.js"></script>
+<script src="/src/components/compliance/ComplianceEvidenceTable.js"></script>
 <script src="/react/executive/ExecutiveOverview.js"></script>
 <script src="/react/threat/ThreatDetection.js"></script>
 <script src="/react/network/NetworkEndpoint.js"></script>

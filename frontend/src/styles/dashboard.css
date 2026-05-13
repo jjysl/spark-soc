@@ -1,0 +1,3 @@
+/* Page-level migration CSS. The legacy dashboard shell remains in dashboard.html until the next phase. */
+.integration-health-card .cb{min-height:72px}
+.compliance-evidence-table{margin-bottom:14px}
