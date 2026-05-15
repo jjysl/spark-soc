@@ -76,65 +76,46 @@
             h('span', {className: 'mono', style: {marginLeft: 'auto'}}, fmtNum(count || 0))
           )),
           h('div', {style: {fontSize: 11, color: 'var(--tm)', marginTop: 10}},
-            'SPARK shows auditable evidence availability and risk signals. It does not calculate certification percentages.'
+            'SPARK shows auditable evidence availability and risk signals. It does not calculate certification scores.'
           )
         )
       )
     );
   }
 
-  function AssetRiskSegments({payload}) {
+  function NistCsfEvidenceTable({payload}) {
     const modules = payload.modules || {};
-    const agents = payload.agents || {};
+    const firstFinding = (payload.findings || [])[0] || {};
+    const evidenceId = firstFinding.document_id || firstFinding.id || 'EVD-AWAITING-REVIEW';
     const rows = [
-      {name: 'Endpoint fleet', value: Math.min(100, Number(payload.total_findings || 0) * 12 + Number(agents.disconnected || 0) * 15), detail: 'findings + disconnected agents'},
-      {name: 'Identity / access', value: Math.min(100, Number(modules.audit || 0) * 14 + Number(modules.rootcheck || 0) * 8), detail: 'audit + rootcheck evidence'},
-      {name: 'Data integrity', value: Math.min(100, Number(modules.fim || 0) * 10), detail: 'FIM / syscheck evidence'},
-      {name: 'Vulnerability posture', value: Math.min(100, Number(modules.vulnerability || 0) * 18), detail: 'vulnerability detector evidence'},
+      ['Govern', 'Audit trail / Evidence Pack', 'SPARK Evidence Pack hash', evidenceId, 'Partially Covered', 'Evidence packaging is available; auditor review is still required.'],
+      ['Identify', 'Endpoint inventory and asset context', 'Wazuh Manager agents', payload.agents?.active ? evidenceId : 'not available', payload.agents?.active ? 'Evidence Collected' : 'Requires Review', 'Agent coverage determines asset context quality.'],
+      ['Protect', 'Response connector readiness', 'FortiGate connector status', 'not available', 'Partially Covered', 'Connector readiness is tracked; enforcement depends on configured policy path.'],
+      ['Detect', 'Wazuh alert correlation', `Wazuh rule / alert count (${fmtNum(payload.total_findings || 0)})`, evidenceId, Number(payload.total_findings || 0) ? 'Evidence Collected' : 'Requires Review', 'Detection evidence is generated from Wazuh telemetry.'],
+      ['Respond', 'FortiGate block action', 'FortiGate object / policy evidence', evidenceId, modules.firewall || modules.fortigate ? 'Evidence Collected' : 'Partially Covered', 'Containment evidence appears after analyst block action.'],
+      ['Recover', 'Post-incident review', 'Analyst action log', evidenceId, 'Requires Review', 'Recovery evidence requires analyst review and closure notes.'],
     ];
     return h('div', {className: 'card'},
       h('div', {className: 'ch'},
         h('div', null,
-          h('div', {className: 'ct'}, 'Digital Asset Risk Score by Control Area'),
-          h('div', {className: 'cs'}, 'Risk estimate from live Wazuh compliance telemetry')
+          h('div', {className: 'ct'}, 'NIST CSF 2.0 Evidence Coverage'),
+          h('div', {className: 'cs'}, 'Auditable technical evidence mapped for analyst and auditor review')
         )
       ),
-      h('div', {className: 'cb'},
-        rows.map(item => {
-          const color = item.value >= 70 ? '#da291c' : item.value >= 40 ? '#f59e0b' : '#10b981';
-          return h('div', {className: 'rseg', key: item.name},
-            h('div', {className: 'rsname'}, item.name),
-            h('div', {className: 'rsbar'}, h('div', {className: 'rsfill', style: {width: `${Math.max(4, item.value)}%`, background: color}})),
-            h('div', {className: 'rsval'}, item.value),
-            h('div', {style: {fontSize: 10, color: 'var(--tm)', minWidth: 120}}, item.detail)
-          );
-        })
-      )
-    );
-  }
-
-  function ControlCoverage({controls}) {
-    return h('div', {className: 'card'},
-      h('div', {className: 'ch'},
-        h('div', null,
-          h('div', {className: 'ct'}, 'Wazuh Compliance Modules'),
-          h('div', {className: 'cs'}, 'Counts from Wazuh rule groups, not framework percentages')
+      h('div', {className: 'table-scroll'},
+        h('table', {className: 'ftable nist-table'},
+          h('thead', null, h('tr', null, ['NIST CSF Function', 'SPARK Control', 'Evidence Source', 'Evidence ID', 'Status', 'Notes'].map(col => h('th', {key: col}, col)))),
+          h('tbody', null, rows.map(row => h('tr', {key: row[0]},
+            h('td', null, h('span', {className: 'badge binfo'}, row[0])),
+            h('td', null, row[1]),
+            h('td', null, row[2]),
+            h('td', null, h('span', {className: 'mono'}, row[3])),
+            h('td', null, h('span', {className: `badge ${row[4] === 'Evidence Collected' ? 'blive' : row[4] === 'Partially Covered' ? 'bwarn' : 'bnew'}`}, row[4])),
+            h('td', null, row[5])
+          )))
         )
       ),
-      h('div', {className: 'cb'},
-        controls.map(control => {
-          const count = Number(control.count || 0);
-          const width = Math.min(100, count ? Math.max(8, count * 8) : 0);
-          const color = count ? '#1a56db' : '#e2e5ea';
-          return h('div', {className: 'cbar', key: control.module},
-            h('div', {className: 'chead'},
-              h('span', null, control.name),
-              h('span', {className: 'cval'}, count ? `${fmtNum(count)} findings` : 'No data')
-            ),
-            h('div', {className: 'ctrack'}, h('div', {className: 'cfill', style: {width: `${width}%`, background: color}}))
-          );
-        })
-      )
+      h('div', {className: 'compliance-disclaimer'}, 'SPARK generates auditable technical evidence for security controls. This is not automatic certification. Evidence collected must be reviewed by a qualified auditor.')
     );
   }
 
@@ -318,15 +299,14 @@
       ),
       h(EvidenceSourceOverview, {payload}),
       h('div', {className: 'g11'},
-        h(ControlCoverage, {controls: payload.controls || []}),
+        h(NistCsfEvidenceTable, {payload}),
         h(AgentReadiness, {agents: payload.agents, notes: payload.notes})
       ),
       h('div', {className: 'g11'},
         h(FindingTable, {items: payload.findings || []}),
         h(MissingMappings, {notes: payload.notes || {}})
       ),
-      window.SparkCompliance?.ComplianceEvidenceTable ? h(window.SparkCompliance.ComplianceEvidenceTable, {rows: []}) : null,
-      h(AssetRiskSegments, {payload})
+      window.SparkCompliance?.ComplianceEvidenceTable ? h(window.SparkCompliance.ComplianceEvidenceTable, {rows: []}) : null
     );
   }
 

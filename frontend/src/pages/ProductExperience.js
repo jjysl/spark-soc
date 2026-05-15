@@ -5,30 +5,33 @@
   const plans = [
     {
       name: 'Starter',
-      price: 'Per endpoint',
+      price: 'R$ 49/endpoint/month',
+      limit: 'Up to 25 endpoints',
       fit: 'PMEs com primeira camada de monitoramento gerenciado',
       features: ['Wazuh agent onboarding', 'Core detection workflow', 'Evidence workspace', 'Monthly analyst review'],
     },
     {
       name: 'MDR',
-      price: 'Per endpoint + log source',
-      fit: 'Times que precisam de resposta assistida e evidência auditável',
+      price: 'R$ 89/endpoint/month',
+      limit: 'Up to 100 endpoints',
+      fit: 'Times que precisam de resposta assistida e evidencia auditavel',
       features: ['FortiGate containment', 'SPARK Trace', 'Evidence Pack', 'Priority response queue'],
       featured: true,
     },
     {
       name: 'Enterprise',
-      price: 'Workspace contract',
-      fit: 'Ambientes multi-site com integrações e governança avançadas',
+      price: 'Custom pricing',
+      limit: 'Multi-site / custom scope',
+      fit: 'Ambientes multi-site com integracoes e governanca avancadas',
       features: ['Dedicated tenant', 'Custom playbooks', 'Compliance evidence mapping', 'Executive reporting'],
     },
   ];
 
   const journey = [
     ['1', 'Create workspace', 'Tenant, users, roles and evidence retention are provisioned.'],
-    ['2', 'Install agent', 'Endpoints start forwarding Wazuh telemetry into the MDR workflow.'],
-    ['3', 'Integrate FortiGate', 'Containment connector validates API access and response policy readiness.'],
-    ['4', 'Receive evidence', 'Analysts receive alerts, containment actions, SPARK Trace and Evidence Packs.'],
+    ['2', 'Connect telemetry sources', 'Wazuh agents and log sources start feeding the MDR workflow.'],
+    ['3', 'Configure response connectors', 'FortiGate containment and SOAR connectors validate response readiness.'],
+    ['4', 'Start evidence-driven response', 'Analysts receive alerts, containment actions, SPARK Trace and Evidence Packs.'],
   ];
 
   function ProductExperienceApp() {
@@ -37,7 +40,7 @@
     function handleCta(kind) {
       const text = kind === 'demo'
         ? 'Demo request captured for the MDR workspace.'
-        : 'Onboarding request staged: workspace, agent and FortiGate connector are the next steps.';
+        : 'Onboarding request staged: workspace, telemetry sources and response connectors are the next steps.';
       setMessage(text);
     }
 
@@ -70,7 +73,7 @@
             [
               ['Audience', 'PMEs and lean IT/security teams'],
               ['Model', 'NG-SOC / MDR as a Service'],
-              ['Commercial metric', 'Endpoint or log source pricing'],
+              ['Commercial metric', 'Endpoint or source-based pricing'],
               ['Outcome', 'Actionable alerts with audit-ready evidence'],
             ].map(row => h(React.Fragment, {key: row[0]}, h('span', null, row[0]), h('strong', null, row[1])))
           )
@@ -93,11 +96,13 @@
             h('div', null, h('div', {className: 'plan-name'}, plan.name), h('div', {className: 'plan-fit'}, plan.fit)),
             plan.featured ? h('span', {className: 'badge blive'}, 'Recommended') : null
           ),
+          h('div', {className: 'plan-fit'}, plan.limit),
           h('div', {className: 'plan-price'}, plan.price),
           h('ul', {className: 'plan-features'}, plan.features.map(feature => h('li', {key: feature}, feature))),
           h('button', {className: `btn ${plan.featured ? 'btnp' : ''}`, onClick: () => handleCta('onboarding')}, 'Start Onboarding')
         ))
       ),
+      h('div', {className: 'compliance-disclaimer', style: {marginTop: 12}}, 'Illustrative MVP pricing for validation purposes. Final commercial terms depend on telemetry sources, endpoint scope, retention and response coverage.'),
       h('div', {className: 'aibox'},
         h('strong', null, 'Differentiator: '),
         'SPARK does not stop at alerting. It links detection, analyst decision, FortiGate response, containment proof and compliance evidence into a repeatable MDR operating model.'

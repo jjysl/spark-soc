@@ -838,6 +838,15 @@ def executive_overview():
     lifecycle_metrics = ticket_store.get_incident_lifecycle_metrics()
     workqueue, sla_summary = _build_workqueue(case_records)
     posture = _build_posture(alert_data, agents, fortigate_data, shuffle_data, sla_summary)
+    fortianalyzer_base = getattr(config, "FORTIANALYZER_BASE_URL", "") or ""
+    fortianalyzer_key = getattr(config, "FORTIANALYZER_API_KEY", "") or ""
+    fortianalyzer_data = {
+        "configured": bool(fortianalyzer_base and fortianalyzer_key),
+        "connected": False,
+        "source": "fortianalyzer",
+        "status": "connector_ready" if not fortianalyzer_base else "configured",
+        "message": "FortiAnalyzer connector: ready for configuration" if not fortianalyzer_base else "FortiAnalyzer endpoint configured; evidence collection not enabled in this release.",
+    }
 
     top_alert = alerts[0] if alerts else {}
     triage = (
@@ -880,6 +889,7 @@ def executive_overview():
             "agents": agents,
         },
         "fortigate": fortigate_data,
+        "fortianalyzer": fortianalyzer_data,
         "shuffle": shuffle_data,
         "triage": triage,
         "workqueue": workqueue,

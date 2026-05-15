@@ -310,6 +310,7 @@
     const [aiBriefing, setAiBriefing] = useState(null);
     const [aiBriefingLoading, setAiBriefingLoading] = useState(false);
     const [aiProvider, setAiProvider] = useState({provider: 'none', mode: 'deterministic_fallback'});
+    const [evidenceHash, setEvidenceHash] = useState('');
     const toast = hooks.useToast ? hooks.useToast() : {pushToast: () => {}};
 
     async function load() {
@@ -474,15 +475,35 @@
 
     function ContainmentConfidence({evidence}) {
       const checks = containmentChecks(evidence);
+      const okChecks = checks.filter(item => item.ok).length;
+      const trafficPath = {label: 'Traffic-path validation', ok: false, pending: true};
+      const score = checks.length ? Math.round((okChecks / checks.length) * 100) : 0;
+      const label = okChecks === checks.length ? 'Verified' : okChecks > 0 ? 'Partially Verified' : 'Not Verified';
       return h('div', {className: 'card'},
-        h('div', {className: 'ch'}, h('div', null, h('div', {className: 'ct'}, 'Containment Confidence'), h('div', {className: 'cs'}, 'Technical checks for FortiGate response evidence'))),
+        h('div', {className: 'ch'},
+          h('div', null, h('div', {className: 'ct'}, 'Containment Confidence'), h('div', {className: 'cs'}, 'FortiGate response evidence and local audit record')),
+          h('span', {className: `badge ${okChecks === checks.length ? 'blive' : okChecks ? 'bwarn' : 'bcrit'}`}, label)
+        ),
+        h('div', {className: 'cb containment-score'},
+          h('div', {className: 'containment-score-main'},
+            h('div', {className: 'kv'}, `${okChecks}/${checks.length}`),
+            h('div', {className: 'muted'}, `${score}% evidence checks confirmed`)
+          ),
+          h('div', {className: 'empty-detail'}, 'Containment Confidence is based on FortiGate API response, blocklist membership, policy presence and local evidence record. Runtime traffic impact depends on traffic path validation.')
+        ),
         h('div', {className: 'cb confidence-grid'},
-          checks.map(item => h('div', {className: 'confidence-item', key: item.label},
+          [...checks, trafficPath].map(item => h('div', {className: 'confidence-item', key: item.label},
             h('span', {className: `confidence-dot ${item.ok ? 'ok' : 'warn'}`}),
-            h('div', null, h('div', {className: 'row-title'}, item.label), h('div', {className: 'muted'}, item.ok ? 'Validated by latest response' : 'Pending latest evidence'))
+            h('div', null, h('div', {className: 'row-title'}, item.label), h('div', {className: 'muted'}, item.ok ? 'Validated by latest response' : item.pending ? 'Pending validation' : 'Pending latest evidence'))
           ))
         )
       );
+    }
+
+    function fortiAnalyzerEvidenceRef(payload) {
+      const fa = payload?.fortianalyzer || {};
+      if (fa.connected || fa.endpoint || fa.base_url) return fa.evidence_ref || 'Configured - awaiting evidence reference';
+      return 'Not configured / Awaiting connector';
     }
 
     function evidencePackSections(evidence, payload, candidate) {
@@ -492,24 +513,85 @@
         ['Technical Evidence', `Wazuh alerts: ${fmtNum(payload.wazuh?.total)}. Rule: ${candidate?.rule_id || '--'}. MITRE: ${caseMitre(candidate)}.`],
         ['Response Actions', `FortiGate object ${containmentObjectName(evidence) || '--'} added to ${containmentGroupName(evidence) || 'SPARK_BLOCKLIST'} with policy ${containmentPolicyName(evidence) || 'SPARK_AUTO_BLOCK'}.`],
         ['Containment Proof', `Evidence ID ${evidence?.evidence_id || '--'}. Containment confidence ${score}%. Status ${evidence?.status || 'Awaiting response evidence'}.`],
+        ['Integrity', evidenceHash ? `SHA256:${evidenceHash}` : 'SHA256 pending evidence payload generation.'],
+        ['FortiAnalyzer Evidence Reference', fortiAnalyzerEvidenceRef(payload)],
         ['Compliance Evidence', 'Technical evidence is available for analyst review and auditor handoff. This is not automatic certification.'],
         ['Next Steps', 'Validate traffic-path enforcement, review related alerts, update the case owner and attach Evidence Pack to the customer workspace.'],
       ];
     }
 
-    function buildEvidencePackText(evidence, payload, candidate) {
-      return evidencePackSections(evidence, payload, candidate)
-        .map(([title, body]) => `${title}\n${body}`)
-        .join('\n\n');
+    function stableStringify(value) {
+      if (value === null || typeof value !== 'object') return JSON.stringify(value);
+      if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+      return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
     }
 
-    function EvidencePack({evidence, payload, candidate, onCopy}) {
+    async function sha256Hex(text) {
+      if (!window.crypto?.subtle) return '';
+      const bytes = new TextEncoder().encode(text);
+      const digest = await window.crypto.subtle.digest('SHA-256', bytes);
+      return Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join('');
+    }
+
+    async function buildEvidencePackPayload(evidence, payload, candidate, briefing) {
+      const actions = Array.isArray(payload?.actions) ? payload.actions.slice(0, 12) : [];
+      if (evidence) {
+        actions.unshift({
+          action: evidence.status === 'unblocked' ? 'unblock' : 'block',
+          ip: evidence.ip || '',
+          reason: evidence.reason || evidence.message || 'Containment action recorded',
+          status: evidence.status || '',
+          evidence_id: evidence.evidence_id || '',
+          object_name: containmentObjectName(evidence),
+          group_name: containmentGroupName(evidence),
+          policy_name: containmentPolicyName(evidence),
+        });
+      }
+      return {
+        evidence_id: evidence?.evidence_id || `EVD-PENDING-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        analyst: 'SOC Analyst',
+        workspace: 'Production Workspace',
+        incident: {
+          title: caseTitle(candidate),
+          severity: candidate?.priority || candidate?.severity || 'requires analyst review',
+          source_ip: caseIp(candidate) || evidence?.ip || 'not available',
+          target: caseTarget(candidate),
+          mitre: caseMitre(candidate) || 'not available',
+          wazuh_rule: candidate?.rule_id || evidence?.wazuh_rule || 'not available',
+          alert_count: payload?.wazuh?.total || evidence?.alert_count || 'not available',
+        },
+        fortigate: {
+          object: containmentObjectName(evidence) || 'not available',
+          group: containmentGroupName(evidence) || 'not available',
+          policy: containmentPolicyName(evidence) || 'not available',
+        },
+        containment_confidence: `${containmentChecks(evidence).filter(item => item.ok).length}/${containmentChecks(evidence).length}`,
+        response_actions: actions.map(sanitizeOperationalObject),
+        ai_briefing_summary: briefing?.sections?.find(([title]) => title === 'Analysis')?.[1] || 'not available',
+        compliance_evidence_refs: ['NIST CSF 2.0 Detect', 'NIST CSF 2.0 Respond', 'ISO 27001:2022 evidence review'],
+        fortianalyzer_evidence_ref: fortiAnalyzerEvidenceRef(payload),
+      };
+    }
+
+    async function buildEvidencePackText(evidence, payload, candidate, briefing) {
+      const pack = await buildEvidencePackPayload(evidence, payload, candidate, briefing);
+      const hash = await sha256Hex(stableStringify(pack));
+      return `${JSON.stringify({...pack, integrity: {algorithm: 'SHA-256', hash}}, null, 2)}\n`;
+    }
+
+    function EvidencePack({evidence, payload, candidate, onCopy, onExport, onCopyHash, hash}) {
       const sections = evidencePackSections(evidence, payload, candidate);
       return h('div', {className: 'card'},
         h('div', {className: 'ch'},
           h('div', null, h('div', {className: 'ct'}, 'Evidence Pack'), h('div', {className: 'cs'}, 'Audit-ready response summary for MDR handoff')),
-          h('button', {className: 'btn', onClick: onCopy}, 'Copy Evidence Pack')
+          h('div', {className: 'row-actions'},
+            h('button', {className: 'btn', onClick: onCopy}, 'Copy Evidence Pack'),
+            h('button', {className: 'btn', onClick: onExport}, 'Export Evidence Pack (.json)'),
+            h('button', {className: 'btn', onClick: onCopyHash, disabled: !hash}, 'Copy SHA256')
+          )
         ),
+        h('div', {className: 'integrity-row'}, h('span', null, 'Integrity'), h('strong', {className: 'mono'}, hash ? `SHA256:${hash}` : 'SHA256 pending')),
         h('div', {className: 'cb evidence-pack'},
           sections.map(([title, body]) => h('div', {className: `response-evidence ${title === 'Containment Proof' && evidence ? 'ok' : ''}`, key: title},
             h('div', {className: 'response-title'}, title),
@@ -601,6 +683,15 @@
     const cases = payload.cases || [];
     const counts = payload.wazuh?.counts || {};
     const briefingCandidate = candidates[0] || cases[0] || {};
+
+    useEffect(() => {
+      let active = true;
+      buildEvidencePackPayload(lastEvidence, payload, briefingCandidate, aiBriefing)
+        .then(pack => sha256Hex(stableStringify(pack)))
+        .then(hash => { if (active) setEvidenceHash(hash); })
+        .catch(() => { if (active) setEvidenceHash(''); });
+      return () => { active = false; };
+    }, [lastEvidence, data, aiBriefing]);
 
     function sanitizeOperationalText(value) {
       if (value === undefined || value === null) return '';
@@ -887,11 +978,39 @@
 
     async function copyEvidencePack() {
       try {
-        const text = buildEvidencePackText(lastEvidence, payload, briefingCandidate);
+        const text = await buildEvidencePackText(lastEvidence, payload, briefingCandidate, aiBriefing);
         await copyText(text);
         toast.pushToast({tone: 'success', title: 'Evidence Pack copied', message: 'Structured evidence is ready for handoff.'});
       } catch (err) {
         toast.pushToast({tone: 'error', title: 'Evidence Pack copy unavailable', message: err.message});
+      }
+    }
+
+    async function exportEvidencePack() {
+      try {
+        const text = await buildEvidencePackText(lastEvidence, payload, briefingCandidate, aiBriefing);
+        const blob = new Blob([text], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `spark-evidence-pack-${lastEvidence?.evidence_id || Date.now()}.json`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        toast.pushToast({tone: 'success', title: 'Evidence Pack exported', message: 'JSON evidence package downloaded with integrity hash.'});
+      } catch (err) {
+        toast.pushToast({tone: 'error', title: 'Evidence Pack export unavailable', message: err.message});
+      }
+    }
+
+    async function copyEvidenceHash() {
+      if (!evidenceHash) return;
+      try {
+        await copyText(`SHA256:${evidenceHash}`);
+        toast.pushToast({tone: 'success', title: 'Evidence hash copied', message: 'SHA256 integrity value copied to clipboard.'});
+      } catch (err) {
+        toast.pushToast({tone: 'error', title: 'Evidence hash copy unavailable', message: err.message});
       }
     }
 
@@ -929,6 +1048,105 @@
           h('textarea', {className: 'form-input', rows: 4, value: reason, onChange: event => onReasonChange(event.target.value), placeholder: 'Describe why containment can be removed'}),
           h('div', {className: validReason ? 'empty-detail' : 'form-warning'}, validReason ? 'Justification accepted for audit evidence.' : 'Enter at least 10 characters to confirm unblock.'),
           h('div', {className: 'empty-detail'}, 'The object will be removed from SPARK_BLOCKLIST and an unblock evidence record will be stored.')
+        )
+      );
+    }
+
+    function traceActorClass(actor) {
+      return {Wazuh: 'binfo', Analyst: 'bnew', FortiGate: 'blive', SPARK: 'bexp', AI: 'binfo', Shuffle: 'binfo', System: 'binfo'}[actor] || 'binfo';
+    }
+
+    function statusClass(status) {
+      const value = String(status || '').toLowerCase();
+      if (value.includes('fail') || value.includes('error')) return 'bcrit';
+      if (value.includes('warn') || value.includes('pending')) return 'bwarn';
+      if (value.includes('success') || value.includes('verified') || value.includes('blocked') || value.includes('generated')) return 'blive';
+      return 'binfo';
+    }
+
+    function buildTraceEvents(payload, evidence, briefing) {
+      const now = new Date().toISOString();
+      const candidate = briefingCandidate || {};
+      const events = [
+        {
+          timestamp: candidate.timestamp || payload?.wazuh?.latest_timestamp || now,
+          actor: 'Wazuh',
+          action: `Alert generated${candidate.rule_id ? ` by rule ${candidate.rule_id}` : ''}`,
+          result: candidate.title || candidate.description || `${fmtNum(payload?.wazuh?.total)} alerts normalized for triage`,
+          status: payload?.wazuh?.total || candidate.rule_id ? 'success' : 'pending',
+        },
+        {
+          timestamp: evidence?.requested_at || evidence?.created_at || now,
+          actor: 'Analyst',
+          action: evidence?.status === 'unblocked' ? 'Unblock IP requested' : 'Block IP reviewed',
+          result: evidence?.ip ? `Target ${evidence.ip}` : 'Awaiting analyst containment decision',
+          status: evidence ? 'success' : 'pending',
+        },
+      ];
+      if (evidence && evidence.status !== 'unblocked') {
+        events.push({
+          timestamp: evidence.created_at || evidence.timestamp || now,
+          actor: 'FortiGate',
+          action: 'Address object and blocklist updated',
+          result: `${containmentObjectName(evidence) || 'Address object'} -> ${containmentGroupName(evidence) || 'SPARK_BLOCKLIST'}`,
+          status: containmentObjectName(evidence) ? 'success' : 'warning',
+        });
+      }
+      if (evidence?.status === 'unblocked') {
+        events.push({
+          timestamp: evidence.created_at || evidence.timestamp || now,
+          actor: 'FortiGate',
+          action: 'Blocklist member removed',
+          result: evidence.reason || 'Containment cleanup recorded',
+          status: 'success',
+        });
+      }
+      events.push({
+        timestamp: evidence?.created_at || now,
+        actor: 'SPARK',
+        action: 'Evidence Pack generated',
+        result: evidence?.evidence_id ? `Evidence ${evidence.evidence_id}` : 'Evidence workspace ready',
+        status: evidence?.evidence_id ? 'success' : 'pending',
+      });
+      events.push({
+        timestamp: briefing?.generatedAt?.toISOString?.() || now,
+        actor: 'AI',
+        action: 'Incident Briefing generated',
+        result: briefing ? `${briefing.source === 'ai-live' ? 'Groq live' : 'Deterministic fallback'} briefing available` : 'Awaiting analyst request',
+        status: briefing ? 'success' : 'pending',
+      });
+      if (payload?.shuffle?.connected) {
+        events.push({
+          timestamp: now,
+          actor: 'Shuffle',
+          action: 'SOAR connector checked',
+          result: `${fmtNum(payload.shuffle.items)} workflow items discovered`,
+          status: 'success',
+        });
+      }
+      return events.slice(0, 8);
+    }
+
+    function SparkTraceTimeline({payload, evidence, briefing}) {
+      const events = buildTraceEvents(payload, evidence, briefing);
+      return h('div', {className: 'card spark-trace-timeline-card'},
+        h('div', {className: 'ch'},
+          h('div', null,
+            h('div', {className: 'ct'}, 'SPARK Trace Timeline'),
+            h('div', {className: 'cs'}, 'Operational story from detection to evidence handoff')
+          ),
+          h('span', {className: 'badge binfo'}, `${fmtNum(events.length)} events`)
+        ),
+        h('div', {className: 'cb trace-timeline'},
+          events.map((event, index) => h('div', {className: 'trace-event', key: `${event.actor}-${index}-${event.action}`},
+            h('div', {className: 'trace-event-time mono'}, fmtTime(event.timestamp)),
+            h('span', {className: `badge ${traceActorClass(event.actor)}`}, event.actor),
+            h('div', {className: 'trace-event-main'},
+              h('div', {className: 'row-title'}, event.action),
+              h('div', {className: 'muted'}, event.result)
+            ),
+            h('span', {className: `badge ${statusClass(event.status)}`}, event.status)
+          ))
         )
       );
     }
@@ -980,13 +1198,14 @@
         error ? `Integration unavailable in this environment. ${error}` : 'Showing Wazuh candidates with FortiGate blocklist response evidence. Containment is pending traffic-path validation.'
       ),
       h(SparkTrace, {payload, evidence: lastEvidence}),
+      h(SparkTraceTimeline, {payload, evidence: lastEvidence, briefing: aiBriefing}),
       h('div', {className: 'source-strip'},
         h(SourceChip, {label: 'Wazuh Indexer', ok: wazuhOk}),
         h(SourceChip, {label: 'Shuffle', ok: shuffleOk})
       ),
       h(components.LoadingState && loading && !data ? components.LoadingState : React.Fragment, loading && !data ? {title: 'Consulting Wazuh Indexer...', detail: 'Collecting incident candidates, cases and response evidence for this workspace.'} : null),
       h('div', {className: 'g11'},
-        h(EvidencePack, {evidence: lastEvidence, payload, candidate: briefingCandidate, onCopy: copyEvidencePack}),
+        h(EvidencePack, {evidence: lastEvidence, payload, candidate: briefingCandidate, onCopy: copyEvidencePack, onExport: exportEvidencePack, onCopyHash: copyEvidenceHash, hash: evidenceHash}),
         h(ContainmentConfidence, {evidence: lastEvidence})
       ),
       h(AiBriefingCard, {briefing: aiBriefing}),
