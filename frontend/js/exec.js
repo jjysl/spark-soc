@@ -32,6 +32,7 @@ function switchTab(id,btn){
   document.querySelectorAll('.tbtn').forEach(b=>b.classList.remove('active'));
   document.getElementById('panel-'+id).classList.add('active');
   btn.classList.add('active');
+  document.body.dataset.activeTab = id;
 }
 
 // TIME SELECTOR

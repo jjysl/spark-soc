@@ -8,5 +8,6 @@
     listCases: () => client.get('/spark/incident-cases'),
     listActions: (limit = 25) => client.get(`/spark/action-events?limit=${encodeURIComponent(limit)}`),
     listActionsForCase: (caseId, limit = 25) => client.get(`/spark/action-events?limit=${encodeURIComponent(limit)}&case_id=${encodeURIComponent(caseId || '')}`),
+    getAiStatus: () => client.get('/spark/ai/status'),
   };
 })();

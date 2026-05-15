@@ -46,6 +46,12 @@ JIRA_API_TOKEN = os.environ.get("JIRA_API_TOKEN", "")
 JIRA_PROJECT_KEY = os.environ.get("JIRA_PROJECT_KEY", "SPARK")
 JIRA_DEFAULT_ISSUE_TYPE = os.environ.get("JIRA_DEFAULT_ISSUE_TYPE", "Task")
 
+AI_PROVIDER = os.environ.get("AI_PROVIDER", "none").lower()
+AI_MODEL = os.environ.get("AI_MODEL", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+
 OLLAMA_BASE = os.environ.get("OLLAMA_BASE", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3")
 

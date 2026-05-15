@@ -49,7 +49,7 @@ def _validate_block_ip(raw_ip: str) -> tuple[str | None, tuple[dict, int] | None
         return None, ({"status": "invalid_ip", "message": "Only valid IPv4 addresses are accepted.", "ip": ip}, 400)
     text = str(parsed)
     if text in PROTECTED_BLOCK_IPS:
-        return None, ({"status": "protected_ip", "message": "Protected lab/control-plane IP cannot be blocked.", "ip": text}, 400)
+        return None, ({"status": "protected_ip", "message": "Protected workspace/control-plane IP cannot be blocked.", "ip": text}, 400)
     return text, None
 
 
@@ -1397,7 +1397,7 @@ def block_ip():
             "fortigate_object": fg_result.get("object", ""),
             "fortigate_group": fg_result.get("group", group_name),
             "fortigate_policy": fg_result.get("policy", policy_name),
-            "enforcement_path": fg_result.get("enforcement_path", "pending network routing validation"),
+            "enforcement_path": fg_result.get("enforcement_path", "containment pending traffic-path validation"),
         }
         shuffle_result = shuffle.dispatch_incident_evidence(
             getattr(config, "SHUFFLE_INCIDENT_WEBHOOK_URL", ""),
@@ -1420,7 +1420,7 @@ def block_ip():
                 "shuffle_message": shuffle_result.get("message", ""),
                 "sent_payload": shuffle_payload,
                 "error": shuffle_result.get("error", ""),
-                "enforcement_path": fg_result.get("enforcement_path", "pending network routing validation"),
+                "enforcement_path": fg_result.get("enforcement_path", "containment pending traffic-path validation"),
             },
         )
     status = 200 if fg_result.get("ok") else 400
@@ -1527,14 +1527,19 @@ def ai_status():
         ai_proxy.check_status(
             config.ANTHROPIC_API_KEY, config.ANTHROPIC_MODEL,
             config.OLLAMA_BASE, config.OLLAMA_MODEL,
+            getattr(config, "AI_PROVIDER", "none"),
+            getattr(config, "GEMINI_API_KEY", ""),
+            getattr(config, "GROQ_API_KEY", ""),
+            getattr(config, "DEEPSEEK_API_KEY", ""),
+            getattr(config, "AI_MODEL", ""),
         )
     )
 
 
-# ── FortiOS Mock Endpoints (compatibilidade) ───────────────────────────────
+# ── FortiOS Compatibility Endpoints ───────────────────────────────
 
 @spark_bp.route("/api/v2/monitor/firewall/session")
-def mock_sessions():
+def fortios_sessions_compat():
     sessions = fortigate.get_active_sessions(
         config.FORTIGATE_BASE_URL, config.FORTIGATE_API_KEY
     )
@@ -1542,7 +1547,7 @@ def mock_sessions():
 
 
 @spark_bp.route("/api/v2/monitor/system/resource/usage")
-def mock_resources():
+def fortios_resources_compat():
     data = fortigate.get_resource_usage(config.FORTIGATE_BASE_URL, config.FORTIGATE_API_KEY)
     return jsonify({"results": {
         "cpu":     [{"current": data["cpu"]}],
@@ -1552,9 +1557,9 @@ def mock_resources():
 
 
 @spark_bp.route("/api/v2/cmdb/firewall/address", methods=["POST", "GET"])
-def mock_fw_address():
+def fortios_address_compat():
     if request.method == "POST":
         data = request.get_json()
-        print(f"[MOCK FortiGate] Address object: {data}")
+        print(f"[FortiOS Compatibility] Address object: {data}")
         return jsonify({"status": "success", "data": data}), 200
     return jsonify({"status": "success", "blocked": ticket_store.get_blocked_ips()})
