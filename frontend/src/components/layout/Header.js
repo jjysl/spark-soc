@@ -15,7 +15,7 @@
       ),
       h('div', {className: 'spark-product-session'},
         h('span', {className: 'badge blive'}, `${online || 0} integrations online`),
-        h('span', {className: 'mts'}, updatedAt || '--:--:-- UTC'),
+        h('span', {className: 'mts'}, updatedAt || '--:--:-- BRT'),
         h('span', {className: 'av'}, user?.avatar || 'SC')
       )
     );

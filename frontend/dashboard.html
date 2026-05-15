@@ -443,7 +443,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
   <div class="tr">
     <div class="spill" id="globalSystemStatus"><div class="sdot sg"></div>Checking live sources</div>
     <div class="spill" id="globalP1Status" style="color:var(--red)"><div class="sdot sr"></div>-- P1 open</div>
-    <div class="mts" id="clock">--:--:-- UTC</div>
+    <div class="mts" id="clock">--:--:-- BRT</div>
     <span class="nbadge" id="globalAlertBadge">--</span>
     <div style="display:flex;align-items:center;gap:8px;margin-left:4px">
       <div class="av" id="userAvatar">...</div>
@@ -495,10 +495,10 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
     </div>
     <div class="krow">
       <div class="kpi ka"><div class="kl">P1 - Critical Incidents</div><div class="kv">...</div><div class="kd">Loading live data</div></div>
-      <div class="kpi"><div class="kl">MTTD</div><div class="kv">...</div><div class="kd">Waiting for Wazuh</div></div>
-      <div class="kpi"><div class="kl">MTTR</div><div class="kv">...</div><div class="kd">Waiting for Shuffle</div></div>
+      <div class="kpi"><div class="kl">MTTD</div><div class="kv">...</div><div class="kd">Awaiting Wazuh telemetry</div></div>
+      <div class="kpi"><div class="kl">MTTR</div><div class="kv">...</div><div class="kd">Awaiting SOAR telemetry</div></div>
       <div class="kpi"><div class="kl">SLA Compliance</div><div class="kv">...</div><div class="kd">Calculando</div></div>
-      <div class="kpi"><div class="kl">Monitored Assets</div><div class="kv">...</div><div class="kd">Waiting for agents</div></div>
+      <div class="kpi"><div class="kl">Monitored Assets</div><div class="kv">...</div><div class="kd">Awaiting endpoint telemetry</div></div>
     </div>
     <div class="aibox"><strong>SPARK Live Triage:</strong> loading live telemetry...</div>
   </div>
@@ -521,7 +521,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
       <div><div class="ptitle">FortiGate &amp; Endpoint Monitoring</div><div class="psub"><span class="ldot"></span>Loading FortiOS REST API and Wazuh telemetry...</div></div>
       <div class="ha"><button class="btn" disabled>Export Evidence</button><button class="btn btnp" disabled>Open Response</button></div>
     </div>
-    <div class="aibox loading"><strong>Network telemetry:</strong> Waiting for live source status.</div>
+    <div class="aibox loading"><strong>Network telemetry:</strong> Awaiting telemetry from connected sources.</div>
   </div>
 </div>
 
@@ -532,7 +532,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
       <div><div class="ptitle">Incident Response &amp; SOAR Automation</div><div class="psub"><span class="ldot"></span>Loading Wazuh candidates and Shuffle status...</div></div>
       <div class="ha"><button class="btn" disabled>Refresh</button><button class="btn btnp" disabled>Cases &amp; Response</button></div>
     </div>
-    <div class="aibox loading"><strong>Incident Response:</strong> Waiting for live source status.</div>
+    <div class="aibox loading"><strong>Incident Response:</strong> Awaiting detection and response telemetry.</div>
   </div>
 </div>
 
@@ -543,7 +543,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
       <div><div class="ptitle">Compliance &amp; Risk Management</div><div class="psub"><span class="ldot"></span>Loading Wazuh policy, audit and vulnerability telemetry...</div></div>
       <div class="ha"><button class="btn" disabled>Schedule Report</button><button class="btn btnp" disabled>Generate Compliance Report</button></div>
     </div>
-    <div class="aibox loading"><strong>Compliance telemetry:</strong> Waiting for Wazuh compliance modules.</div>
+    <div class="aibox loading"><strong>Compliance telemetry:</strong> Awaiting evidence coverage data.</div>
   </div>
 </div>
 
@@ -554,17 +554,17 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
       <div><div class="ptitle">Cases &amp; Response</div><div class="psub"><span class="ldot"></span>Loading SPARK case records and FortiGate actions...</div></div>
       <div class="ha"><button class="btn" disabled>Refresh</button><button class="btn btnj" disabled>New Case</button></div>
     </div>
-    <div class="aibox loading"><strong>Cases &amp; Response:</strong> Waiting for local case store.</div>
+    <div class="aibox loading"><strong>Cases &amp; Response:</strong> Awaiting case workspace data.</div>
   </div>
 </div>
 </main>
 <footer class="footer">
-  <div>SPARK SOC — NG-SOC as a Service &nbsp;·&nbsp; FIAP / Fortinet Challenge 2025 &nbsp;·&nbsp; Team: Diogo, José, Júlio, Matheus, Rafael</div>
+  <div>SPARK SOC — MDR Command Center &nbsp;·&nbsp; NG-SOC as a Service &nbsp;·&nbsp; Team: Diogo, José, Júlio, Matheus, Rafael</div>
   <div class="fsys">
     <span>Telemetry <span class="fsok">API-driven</span></span>
     <span>Response <span class="fsok">FortiOS REST</span></span>
     <span>SOAR <span class="fsok">Shuffle webhook</span></span>
-    <span class="mts" id="footerClock">--:--:-- UTC</span>
+    <span class="mts" id="footerClock">--:--:-- BRT</span>
   </div>
 </footer>
 

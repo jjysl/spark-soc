@@ -5,11 +5,11 @@
     const ok = ['online', 'success', 'connected', 'live'].includes(String(status || '').toLowerCase());
     return h('div', {className: 'card integration-health-card'},
       h('div', {className: 'ch'},
-        h('div', null, h('div', {className: 'ct'}, name), h('div', {className: 'cs'}, endpoint || 'Endpoint not configured')),
+        h('div', null, h('div', {className: 'ct'}, name), h('div', {className: 'cs'}, endpoint || 'Connector not configured')),
         h(window.SparkComponents.StatusBadge, {status: ok ? 'online' : status || 'offline'})
       ),
       h('div', {className: 'cb'},
-        h('div', {className: 'apirow'}, h('span', {className: `adot ${ok ? 'ok' : 'warn'}`}), h('span', null, detail || 'Waiting for telemetry')),
+        h('div', {className: 'apirow'}, h('span', {className: `adot ${ok ? 'ok' : 'warn'}`}), h('span', null, detail || 'Awaiting telemetry')),
         checkedAt ? h('div', {className: 'empty-detail'}, `Last check: ${checkedAt}`) : null
       )
     );

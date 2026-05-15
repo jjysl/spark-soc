@@ -19,7 +19,11 @@ async function doLogout() {
 }
 
 // CLOCK
-function tick(){const s=new Date().toUTCString().split(' ')[4]+' UTC';document.getElementById('clock').textContent=s;document.getElementById('footerClock').textContent=s;}
+function tick(){
+  const s=new Date().toLocaleTimeString('pt-BR',{hour12:false,timeZone:'America/Sao_Paulo'})+' BRT';
+  document.getElementById('clock').textContent=s;
+  document.getElementById('footerClock').textContent=s;
+}
 tick();setInterval(tick,1000);
 
 // TAB SWITCH

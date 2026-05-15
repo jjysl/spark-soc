@@ -18,7 +18,8 @@
 
   function StatusBadge({status, label}) {
     const key = String(status || '').toLowerCase();
-    return h('span', {className: `badge ${classes[key] || 'binfo'}`}, label || status || 'unknown');
+    const display = label || (key === 'not_configured' ? 'Connector not configured' : status) || 'unknown';
+    return h('span', {className: `badge ${classes[key] || 'binfo'}`}, display);
   }
 
   function SourceChip({label, ok, status}) {

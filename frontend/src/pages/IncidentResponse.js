@@ -113,7 +113,7 @@
           h('div', {className: 'ct'}, 'Shuffle SOAR Status'),
           h('div', {className: 'cs'}, 'Connectivity and basic endpoint discovery')
         ),
-        h('span', {className: `badge ${ok ? 'blive' : 'bhigh'}`}, ok ? 'Connected' : 'Unavailable')
+        h('span', {className: `badge ${ok ? 'blive' : 'bhigh'}`}, ok ? 'Connected' : 'Connector unavailable')
       ),
       h('div', {className: 'cb'},
         h('div', {className: 'apirow'},
@@ -131,7 +131,7 @@
           h('span', null, 'Items discovered'),
           h('span', {style: {marginLeft: 'auto', color: 'var(--t2)'}}, fmtNum(shuffle?.items))
         ),
-        !ok ? h('div', {style: {fontSize: 11, color: 'var(--amber)', marginTop: 10}}, shuffle?.error || 'Configure SHUFFLE_BASE_URL and SHUFFLE_API_KEY on the lab machine.') : null
+        !ok ? h('div', {style: {fontSize: 11, color: 'var(--amber)', marginTop: 10}}, shuffle?.error || 'SOAR connector credentials are not available in this workspace.') : null
       )
     );
   }
@@ -518,8 +518,8 @@
     const counts = payload.wazuh?.counts || {};
     const status = useMemo(() => {
       if (loading) return `Updating ${range} response telemetry...`;
-      if (updatedAt) return `Live source check - updated ${updatedAt.toLocaleTimeString('en-US')}`;
-      return 'Waiting for live source status.';
+      if (updatedAt) return `Live source check - updated ${updatedAt.toLocaleTimeString('pt-BR', {hour12: false, timeZone: 'America/Sao_Paulo'})} BRT`;
+      return 'Awaiting telemetry from connected sources.';
     }, [loading, updatedAt, range]);
 
     return h(React.Fragment, null,
@@ -536,7 +536,7 @@
       ),
       h('div', {className: `aibox ${error ? 'loading' : ''}`},
         h('strong', null, 'Incident Response: '),
-        error ? `API unavailable (${error}). No simulated playbook data is shown.` : 'Showing Wazuh candidates with FortiGate blocklist response evidence. Runtime enforcement remains pending network routing validation.'
+        error ? `Integration unavailable in this environment. ${error}` : 'Showing Wazuh candidates with FortiGate blocklist response evidence. Containment is pending traffic-path validation.'
       ),
       h(SparkTrace, {payload, evidence: lastEvidence}),
       h('div', {className: 'source-strip'},
@@ -553,7 +553,7 @@
         h(KpiCard, {label: 'P1 Candidates', value: fmtNum(counts.p1), detail: 'Wazuh level >= 12'}),
         h(KpiCard, {label: 'P2 Candidates', value: fmtNum(counts.p2), detail: 'Wazuh level 7-11'}),
         h(KpiCard, {label: 'Open Cases', value: fmtNum(cases.length), detail: 'Lifecycle queue'}),
-        h(KpiCard, {label: 'Shuffle Workflows', value: shuffleOk ? fmtNum(payload.shuffle?.items) : 'N/A', detail: shuffleOk ? `<span class="dn">${payload.shuffle?.source || 'connected'}</span>` : '<span class="up">Endpoint not validated</span>'})
+        h(KpiCard, {label: 'Shuffle Workflows', value: shuffleOk ? fmtNum(payload.shuffle?.items) : 'N/A', detail: shuffleOk ? `<span class="dn">${payload.shuffle?.source || 'connected'}</span>` : '<span class="up">Connector not validated</span>'})
       ),
       h('div', {className: 'g11'},
         h(ShuffleStatus, {shuffle: payload.shuffle}),

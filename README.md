@@ -1,6 +1,6 @@
 # SPARK SOC
 
-NG-SOC as a Service para o FIAP/Fortinet Challenge.
+NG-SOC as a Service e MDR Command Center para demonstracoes executivas e operacao SOC.
 
 ## Estrutura
 
@@ -123,7 +123,7 @@ Teste manual de bloqueio:
 ```bash
 curl -X POST http://192.168.50.20:5000/spark/fortigate/block-ip \
   -H "Content-Type: application/json" \
-  -d '{"ip":"10.255.255.124","reason":"Manual SOC containment test","source":"manual","severity":"high"}'
+  -d '{"ip":"10.255.255.124","reason":"Manual SOC containment validation","source":"manual","severity":"high"}'
 ```
 
 Listar bloqueios:
@@ -137,7 +137,7 @@ Teste manual de desbloqueio:
 ```bash
 curl -X POST http://192.168.50.20:5000/spark/fortigate/unblock-ip \
   -H "Content-Type: application/json" \
-  -d '{"ip":"10.255.255.124","reason":"Test cleanup"}'
+  -d '{"ip":"10.255.255.124","reason":"Containment validation cleanup"}'
 ```
 
 Se o `sudo` pedir senha, digite a senha do usuário `wazuh`. Se o serviço falhar,
@@ -192,7 +192,7 @@ Regra de produto: a migracao React nao pode empobrecer o dashboard. O shell lega
 
 Inventario visual que deve ser preservado antes de qualquer nova remocao:
 
-- Header/topbar: marca SPARK SOC, status live, relogio UTC, usuario, role e logout.
+- Header/topbar: marca SPARK SOC, status live, relogio BRT, usuario, role e logout.
 - Tabs: navegacao horizontal, estado ativo, spacing compacto e responsividade.
 - Cards/KPIs: bordas, sombra, badges de severidade, estados criticos e grid responsivo.
 - Graficos e visualizacoes: qualquer grafico/timeline/barra existente deve ter equivalente React antes da troca.
