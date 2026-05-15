@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPARK SOC | Product</title>
+<link rel="stylesheet" href="/src/styles/tokens.css">
+<link rel="stylesheet" href="/src/styles/components.css">
+<link rel="stylesheet" href="/src/styles/dashboard.css">
+<style>
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--t1);margin:0}
+.product-page-shell{min-height:100vh;display:flex;flex-direction:column}
+.product-page-header{height:62px;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:18px;padding:0 24px;box-shadow:var(--sh)}
+.product-page-brand{display:flex;align-items:center;gap:10px}.product-page-name{font-size:15px;font-weight:900;color:var(--t1)}.product-page-sub{font-size:11px;color:var(--tm);margin-top:2px}
+.product-page-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.product-page-main{width:min(1180px,100%);margin:0 auto;padding:24px}
+@media(max-width:720px){.product-page-header{height:auto;align-items:flex-start;flex-direction:column;padding:16px 18px}.product-page-main{padding:18px}}
+</style>
+</head>
+<body>
+<div class="product-page-shell">
+  <header class="product-page-header">
+    <div class="product-page-brand">
+      <div class="bmark"><svg viewBox="0 0 16 16"><path d="M8 1L2 4v4c0 3.5 2.5 6.7 6 7.4C11.5 14.7 14 11.5 14 8V4L8 1zm0 2.2l4 2v2.8c0 2.3-1.6 4.4-4 5.1-2.4-.7-4-2.8-4-5.1V5.2l4-2z"/></svg></div>
+      <div><div class="product-page-name">SPARK SOC</div><div class="product-page-sub">NG-SOC / MDR Command Center</div></div>
+    </div>
+    <div class="product-page-actions">
+      <a class="btn" href="/login">Sign in</a>
+      <a class="btn btnp" href="/login">Start Onboarding</a>
+    </div>
+  </header>
+  <main class="product-page-main" id="product-root">
+    <div class="aibox loading"><strong>Product workspace:</strong> Loading SPARK SOC product experience.</div>
+  </main>
+</div>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="/src/pages/ProductExperience.js"></script>
+</body>
+</html>

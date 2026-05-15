@@ -46,6 +46,10 @@ def create_app() -> Flask:
             return redirect("/")
         return send_from_directory(FRONTEND_DIR, "login.html")
 
+    @app.route("/product")
+    def product_page():
+        return send_from_directory(FRONTEND_DIR, "product.html")
+
     @app.route("/")
     @require_login
     def dashboard():
@@ -64,7 +68,9 @@ def _print_banner() -> None:
     print("  AI Status:   http://localhost:5000/spark/ai/status")
     print("  Wazuh Debug: http://localhost:5000/spark/wazuh-debug")
     print()
-    if config.ANTHROPIC_API_KEY:
+    provider = getattr(config, "AI_PROVIDER", "none")
+    print(f"  [IA] Incident briefing provider: {provider}")
+    if getattr(config, "ANTHROPIC_API_KEY", ""):
         print(f"  [IA] Anthropic Claude: CONFIGURADO ({config.ANTHROPIC_MODEL})")
     else:
         print("  [IA] Anthropic Claude: KEY NAO CONFIGURADA")

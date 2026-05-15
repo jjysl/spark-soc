@@ -260,3 +260,17 @@ O dashboard comunica o fluxo operacional `Detect -> Decide -> Respond -> Documen
 - AppShell React profissional existe em `frontend/src/components/layout` como alvo da proxima fase, mas ainda nao substitui o shell ativo para evitar perda visual.
 
 `dashboard.html` e `frontend/js/exec.js` continuam ativos porque ainda carregam o header, tabs, relogio e responsividade com paridade visual total. A remocao deve acontecer apenas depois que o AppShell React reproduzir ou melhorar esses elementos.
+
+## AI Provider Configuration
+
+Incident briefing supports provider selection through environment variables. No API key should be committed.
+
+```env
+AI_PROVIDER=none
+AI_MODEL=
+GEMINI_API_KEY=
+GROQ_API_KEY=
+DEEPSEEK_API_KEY=
+```
+
+Supported values for `AI_PROVIDER` are `gemini`, `groq`, `deepseek`, and `none`. When no provider is configured, SPARK keeps the deterministic incident briefing fallback active so the SOC workflow remains available.

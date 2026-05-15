@@ -111,9 +111,48 @@ def autofill_ollama(ollama_base: str, ollama_model: str, context: str) -> tuple[
 
 # ── Status ─────────────────────────────────────────────────────────────────
 
-def check_status(api_key: str, model: str, ollama_base: str, ollama_model: str) -> dict:
+def check_provider_config(
+    provider: str,
+    gemini_key: str = "",
+    groq_key: str = "",
+    deepseek_key: str = "",
+    model: str = "",
+) -> dict:
+    """Return provider readiness without exposing secrets or requiring network access."""
+    selected = (provider or "none").lower()
+    keys = {
+        "gemini": bool(gemini_key),
+        "groq": bool(groq_key),
+        "deepseek": bool(deepseek_key),
+        "none": False,
+    }
+    configured = keys.get(selected, False)
+    return {
+        "provider": selected if selected in keys else "none",
+        "configured": configured,
+        "model": model or "provider-default",
+        "mode": "provider" if configured else "deterministic_fallback",
+        "message": "AI connector configured" if configured else "Deterministic briefing fallback active",
+    }
+
+
+def check_status(
+    api_key: str,
+    model: str,
+    ollama_base: str,
+    ollama_model: str,
+    provider: str = "none",
+    gemini_key: str = "",
+    groq_key: str = "",
+    deepseek_key: str = "",
+    provider_model: str = "",
+) -> dict:
     """Verifica disponibilidade de cada provedor de IA."""
-    result: dict = {}
+    result: dict = {
+        "selected_provider": check_provider_config(
+            provider, gemini_key, groq_key, deepseek_key, provider_model
+        )
+    }
 
     # Anthropic
     if api_key:
