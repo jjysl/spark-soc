@@ -465,6 +465,21 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
   <button class="tbtn" onclick="switchTab('jira',this)">Cases &amp; Response</button>
 </nav>
 
+<section class="product-strip" aria-label="SPARK SOC operating model">
+  <div class="product-strip-main">
+    <span class="product-kicker">NG-SOC / MDR Command Center</span>
+    <strong>Detect → Decide → Respond → Document</strong>
+    <span>Live Wazuh telemetry, FortiGate containment and audit-ready evidence in one analyst workflow.</span>
+  </div>
+  <div class="product-strip-steps">
+    <span>Detect</span>
+    <span>Analyze</span>
+    <span>Respond</span>
+    <span>Contain</span>
+    <span>Document</span>
+  </div>
+</section>
+
 <main class="main">
 
 <!-- ----------- TAB 1 — EXECUTIVE OVERVIEW ----------- -->
@@ -578,6 +593,10 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
 <script src="/src/components/incident/ContainmentStatus.js"></script>
 <script src="/src/components/integrations/IntegrationHealthCard.js"></script>
 <script src="/src/components/compliance/ComplianceEvidenceTable.js"></script>
+<script src="/src/components/layout/Header.js"></script>
+<script src="/src/components/layout/SidebarOrTabs.js"></script>
+<script src="/src/components/layout/PageSection.js"></script>
+<script src="/src/components/layout/AppShell.js"></script>
 <script src="/src/pages/ExecutiveOverview.js"></script>
 <script src="/src/pages/ThreatDetection.js"></script>
 <script src="/src/pages/NetworkEndpoint.js"></script>

@@ -148,7 +148,7 @@
     );
   }
 
-  function FortiGateBlocklist({fortigate}) {
+  function FortiGateBlocklist({fortigate, onUnblock, actionState}) {
     const group = fortigate?.blocklist_group || {};
     const members = Array.isArray(group.members) ? group.members : [];
     const policyPresent = Boolean(fortigate?.blocklist_policy_present);
@@ -169,8 +169,15 @@
           h(MetricTile, {label: 'Enforcement', value: 'Pending', detail: 'Network routing validation'})
         ),
         members.length ? h('table', {className: 'ftable'},
-          h('thead', null, h('tr', null, h('th', null, 'Group Members'))),
-          h('tbody', null, members.slice(0, 12).map(name => h('tr', {key: name}, h('td', null, h('span', {className: 'mono'}, name)))))
+          h('thead', null, h('tr', null, ['Group Member', 'Derived IP', 'Action'].map(col => h('th', {key: col}, col)))),
+          h('tbody', null, members.slice(0, 12).map(name => {
+            const ip = String(name || '').replace(/^SPARK_BLOCK_/, '').replace(/_/g, '.');
+            return h('tr', {key: name},
+              h('td', null, h('span', {className: 'mono'}, name)),
+              h('td', null, h('span', {className: 'mono'}, ip.includes('.') ? ip : '--')),
+              h('td', null, ip.includes('.') ? h('button', {className: 'btn', disabled: actionState === `unblock:${ip}`, onClick: () => onUnblock(ip)}, actionState === `unblock:${ip}` ? 'Unblocking...' : 'Unblock') : null)
+            );
+          }))
         ) : h(EmptyState, {title: 'SPARK_BLOCKLIST has no visible members', detail: 'Response actions add SPARK_BLOCK_* objects without removing existing members.'})
       )
     );
@@ -376,6 +383,7 @@
     const [loading, setLoading] = useState(false);
     const [updatedAt, setUpdatedAt] = useState(null);
     const [message, setMessage] = useState('');
+    const [actionState, setActionState] = useState('');
 
     async function load() {
       setLoading(true);
@@ -398,6 +406,19 @@
         });
       } finally {
         setLoading(false);
+      }
+    }
+
+    async function unblockIp(ip) {
+      setActionState(`unblock:${ip}`);
+      try {
+        const payload = await (window.SparkApi || {}).fortigate.unblockIp({ip, reason: 'Network / Endpoint unblock review'});
+        setMessage(`Unblock ${ip}: ${payload.status || payload.message || 'submitted'}`);
+        await load();
+      } catch (err) {
+        setMessage(`Unblock failed for ${ip}: ${err.message}`);
+      } finally {
+        setActionState('');
       }
     }
 
@@ -487,7 +508,7 @@
       ),
       h('div', {className: 'g11'},
         h(FortiGateRoutes, {routes: payload.fortigate?.routes}),
-        h(FortiGateBlocklist, {fortigate: payload.fortigate})
+        h(FortiGateBlocklist, {fortigate: payload.fortigate, onUnblock: unblockIp, actionState})
       ),
       h('div', {className: 'g11'},
         h(TopologySummary, {data: payload}),

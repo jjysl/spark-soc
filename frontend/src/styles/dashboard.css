@@ -1,3 +1,31 @@
 /* Page-level migration CSS. The legacy dashboard shell remains in dashboard.html until the next phase. */
 .integration-health-card .cb{min-height:72px}
 .compliance-evidence-table{margin-bottom:14px}
+.product-strip{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:13px 24px;border-bottom:1px solid var(--border);background:linear-gradient(90deg,#fff,#f8fafc);box-shadow:0 1px 2px rgba(15,23,42,.04)}
+.product-strip-main{display:flex;align-items:center;gap:10px;flex-wrap:wrap;color:var(--t2);font-size:12px}
+.product-strip-main strong{font-size:13px;color:var(--t1);letter-spacing:.01em}
+.product-kicker{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--red);border:1px solid var(--red-b);background:var(--red-l);border-radius:999px;padding:3px 8px}
+.product-strip-steps{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.product-strip-steps span{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;border-radius:999px;padding:4px 8px}
+.spark-app-shell{min-height:100vh;background:var(--bg);color:var(--t1)}
+.spark-product-header{height:58px;display:flex;align-items:center;gap:18px;padding:0 22px;background:#fff;border-bottom:1px solid var(--border);box-shadow:var(--sh)}
+.spark-product-brand{display:flex;align-items:center;gap:10px;padding-right:18px;border-right:1px solid var(--border)}
+.spark-product-flow{display:flex;align-items:center;gap:6px;flex:1}.spark-product-flow span{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:#065f46;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:999px;padding:4px 8px}
+.spark-product-session{display:flex;align-items:center;gap:10px}
+.spark-shell-body{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:calc(100vh - 58px)}
+.spark-product-nav{background:#fff;border-right:1px solid var(--border);padding:14px 10px;display:flex;flex-direction:column;gap:4px}
+.spark-product-nav button{font-family:'Inter',sans-serif;border:0;background:transparent;color:var(--t2);font-size:12px;font-weight:700;text-align:left;border-radius:var(--r);padding:9px 10px;cursor:pointer}
+.spark-product-nav button.active,.spark-product-nav button:hover{background:var(--red-l);color:var(--red)}
+.spark-shell-main{padding:20px 24px;min-width:0}
+.spark-trace{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:14px}
+.trace-step{background:#fff;border:1px solid var(--border);border-radius:var(--rl);padding:11px 12px;box-shadow:var(--sh);position:relative;min-height:82px}
+.trace-step.active{border-color:#bfdbfe;background:#eff6ff}.trace-step.done{border-color:#a7f3d0;background:#ecfdf5}.trace-step.warn{border-color:#fcd34d;background:#fffbeb}
+.trace-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--tm);margin-bottom:5px}
+.trace-title{font-size:13px;font-weight:800;color:var(--t1)}
+.trace-detail{font-size:11px;color:var(--t2);margin-top:4px;line-height:1.35}
+.confidence-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.confidence-item{display:flex;align-items:flex-start;gap:8px;border:1px solid var(--border);background:#fafbfc;border-radius:var(--r);padding:9px}
+.confidence-dot{width:9px;height:9px;border-radius:50%;margin-top:3px;background:var(--tm);flex-shrink:0}.confidence-dot.ok{background:#10b981}.confidence-dot.warn{background:#f59e0b}
+.evidence-pack{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.evidence-pack .response-evidence{margin:0}
+@media(max-width:900px){.product-strip{align-items:flex-start;flex-direction:column}.spark-trace{grid-template-columns:1fr}.evidence-pack,.confidence-grid{grid-template-columns:1fr}}

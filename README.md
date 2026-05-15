@@ -249,3 +249,14 @@ As paginas ativas do dashboard agora carregam de `frontend/src/pages`, mantendo 
 - Cases & Response: listagem rica de casos, filtros, formulario, FortiGate block action, escalonamento, Jira e logs de resposta.
 
 O shell `frontend/dashboard.html` e `frontend/js/exec.js` ainda sao ativos por decisao de paridade visual. Eles so devem ser removidos quando um AppShell React reproduzir o mesmo header, tabs, spacing, estados globais e responsividade.
+
+## Product UI Direction
+
+O dashboard comunica o fluxo operacional `Detect -> Decide -> Respond -> Document`. A camada visual adicionada nesta fase preserva os graficos e tabelas existentes, mas reforca o posicionamento de produto MDR:
+
+- Product strip no shell com narrativa NG-SOC/MDR e etapas Detect, Analyze, Respond, Contain, Document.
+- Incident Response com SPARK Trace, Block IP modal, Evidence Pack e Containment Confidence.
+- Block/Unblock continuam usando os endpoints FortiGate reais e atualizam blocklist/action log sem reload completo.
+- AppShell React profissional existe em `frontend/src/components/layout` como alvo da proxima fase, mas ainda nao substitui o shell ativo para evitar perda visual.
+
+`dashboard.html` e `frontend/js/exec.js` continuam ativos porque ainda carregam o header, tabs, relogio e responsividade com paridade visual total. A remocao deve acontecer apenas depois que o AppShell React reproduzir ou melhorar esses elementos.

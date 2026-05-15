@@ -277,6 +277,7 @@
     const [updatedAt, setUpdatedAt] = useState(null);
     const [lastEvidence, setLastEvidence] = useState(null);
     const [blocklist, setBlocklist] = useState([]);
+    const [blockTarget, setBlockTarget] = useState(null);
     const toast = hooks.useToast ? hooks.useToast() : {pushToast: () => {}};
 
     async function load() {
@@ -347,21 +348,34 @@
       }
     }
 
-    async function blockCandidateIp(item) {
+    function openBlockModal(item) {
       const ip = caseIp(item);
       if (!ip) return;
+      setBlockTarget({
+        ...item,
+        ip,
+        title: caseTitle(item),
+        case_id: item.case_id || item.caseId || item.id || '',
+      });
+    }
+
+    async function submitBlockIp(input) {
+      if (!blockTarget?.ip) return;
+      const item = blockTarget;
+      const ip = item.ip;
       const caseId = item.case_id || item.caseId || item.id || '';
       setActionState(`block:${caseId || ip}`);
       try {
         const payload = await api.fortigate.blockIp({
           ip,
-          reason: caseTitle(item) || item.rule_id || 'Incident candidate',
+          reason: input?.reason || caseTitle(item) || item.rule_id || 'Incident candidate',
           source: 'manual',
           severity: String(item.priority || '').toUpperCase() === 'P1' ? 'critical' : 'high',
-          duration_minutes: 60,
+          duration_minutes: input?.duration_minutes || 60,
           incident_id: caseId || item.document_id || item.rule_id || '',
         });
         setLastEvidence(payload);
+        setBlockTarget(null);
         toast.pushToast({
           tone: 'success',
           title: 'FortiGate block applied',
@@ -374,6 +388,63 @@
       } finally {
         setActionState('');
       }
+    }
+
+    function SparkTrace({payload, evidence}) {
+      const steps = [
+        ['Detect', 'Wazuh alert', `${fmtNum(payload.wazuh?.total)} alerts in range`, 'done'],
+        ['Analyze', 'Prioritize', `${fmtNum(candidates.length)} candidates`, candidates.length ? 'active' : 'warn'],
+        ['Respond', 'FortiGate API', evidence ? 'Containment action executed' : 'Ready for analyst action', evidence ? 'done' : 'active'],
+        ['Contain', 'SPARK_BLOCKLIST', evidence?.group_name || `${fmtNum(blocklist.length)} blocked IPs`, evidence ? 'done' : 'warn'],
+        ['Document', 'Evidence Pack', evidence?.evidence_id ? `Evidence ${evidence.evidence_id}` : 'Awaiting response evidence', evidence ? 'done' : 'warn'],
+      ];
+      return h('div', {className: 'spark-trace'},
+        steps.map(([label, title, detail, state]) => h('div', {className: `trace-step ${state}`, key: label},
+          h('div', {className: 'trace-label'}, label),
+          h('div', {className: 'trace-title'}, title),
+          h('div', {className: 'trace-detail'}, detail)
+        ))
+      );
+    }
+
+    function ContainmentConfidence({evidence}) {
+      const fg = evidence?.fortigate || {};
+      const checks = [
+        ['FortiGate API OK', Boolean(evidence && evidence.status === 'blocked')],
+        ['Address object present', Boolean(evidence?.object_name || fg.object_created_or_updated)],
+        ['SPARK_BLOCKLIST updated', Boolean(evidence?.group_name || fg.group_updated)],
+        ['Policy active', Boolean(evidence?.policy_name || fg.policy_present)],
+        ['Evidence recorded', Boolean(evidence?.evidence_id)],
+      ];
+      return h('div', {className: 'card'},
+        h('div', {className: 'ch'}, h('div', null, h('div', {className: 'ct'}, 'Containment Confidence'), h('div', {className: 'cs'}, 'Technical checks for FortiGate response evidence'))),
+        h('div', {className: 'cb confidence-grid'},
+          checks.map(([label, ok]) => h('div', {className: 'confidence-item', key: label},
+            h('span', {className: `confidence-dot ${ok ? 'ok' : 'warn'}`}),
+            h('div', null, h('div', {className: 'row-title'}, label), h('div', {className: 'muted'}, ok ? 'Validated by latest response' : 'Pending latest evidence'))
+          ))
+        )
+      );
+    }
+
+    function EvidencePack({evidence, payload}) {
+      return h('div', {className: 'card'},
+        h('div', {className: 'ch'}, h('div', null, h('div', {className: 'ct'}, 'Evidence Pack'), h('div', {className: 'cs'}, 'Audit-ready response summary for MDR handoff'))),
+        h('div', {className: 'cb evidence-pack'},
+          h('div', {className: 'response-evidence ok'},
+            h('div', {className: 'response-title'}, 'FortiGate Evidence'),
+            h('div', {className: 'response-grid'},
+              [['IP', evidence?.ip], ['Evidence ID', evidence?.evidence_id], ['Object', evidence?.object_name], ['Group', evidence?.group_name], ['Policy', evidence?.policy_name], ['Status', evidence?.status]].map(row => h(React.Fragment, {key: row[0]}, h('span', null, row[0]), h('strong', null, row[1] || '--')))
+            )
+          ),
+          h('div', {className: 'response-evidence'},
+            h('div', {className: 'response-title'}, 'Detection Evidence'),
+            h('div', {className: 'response-grid'},
+              [['Wazuh alerts', fmtNum(payload.wazuh?.total)], ['Candidates', fmtNum(candidates.length)], ['Shuffle', payload.shuffle?.connected ? 'online' : 'offline'], ['Blocklist IPs', fmtNum(blocklist.length)]].map(row => h(React.Fragment, {key: row[0]}, h('span', null, row[0]), h('strong', null, row[1] || '--')))
+            )
+          )
+        )
+      );
     }
 
     async function unblockIp(item) {
@@ -467,12 +538,16 @@
         h('strong', null, 'Incident Response: '),
         error ? `API unavailable (${error}). No simulated playbook data is shown.` : 'Showing Wazuh candidates with FortiGate blocklist response evidence. Runtime enforcement remains pending network routing validation.'
       ),
+      h(SparkTrace, {payload, evidence: lastEvidence}),
       h('div', {className: 'source-strip'},
         h(SourceChip, {label: 'Wazuh Indexer', ok: wazuhOk}),
         h(SourceChip, {label: 'Shuffle', ok: shuffleOk})
       ),
       h(components.LoadingState && loading && !data ? components.LoadingState : React.Fragment, loading && !data ? {title: 'Loading response telemetry', detail: 'Collecting candidates, cases, and action evidence.'} : null),
-      lastEvidence && window.SparkIncident?.EvidencePanel ? h(window.SparkIncident.EvidencePanel, {evidence: lastEvidence}) : null,
+      h('div', {className: 'g11'},
+        lastEvidence && window.SparkIncident?.EvidencePanel ? h(window.SparkIncident.EvidencePanel, {evidence: lastEvidence}) : h(EvidencePack, {evidence: lastEvidence, payload}),
+        h(ContainmentConfidence, {evidence: lastEvidence})
+      ),
       h('div', {className: 'g4'},
         h(KpiCard, {label: 'Incident Candidates', value: fmtNum(candidates.length), detail: `<span class="up">${fmtNum(payload.wazuh?.total)}</span> Wazuh alerts in range`, critical: candidates.length > 0}),
         h(KpiCard, {label: 'P1 Candidates', value: fmtNum(counts.p1), detail: 'Wazuh level >= 12'}),
@@ -484,9 +559,17 @@
         h(ShuffleStatus, {shuffle: payload.shuffle}),
         h(ReadinessPanel, {notes: payload.notes})
       ),
-      h(CandidateTable, {items: candidates, onCreateCase: createCase, onBlock: blockCandidateIp, actionState}),
-      h(CaseQueue, {cases, onCaseAction: runCaseAction, onBlock: blockCandidateIp, actionState}),
+      h(CandidateTable, {items: candidates, onCreateCase: createCase, onBlock: openBlockModal, actionState}),
+      h(CaseQueue, {cases, onCaseAction: runCaseAction, onBlock: openBlockModal, actionState}),
       h(FortiGateBlocklistCard, {items: blocklist}),
+      window.SparkIncident?.BlockIpModal ? h(window.SparkIncident.BlockIpModal, {
+        open: Boolean(blockTarget),
+        target: blockTarget,
+        defaultReason: blockTarget ? `Containment for ${caseTitle(blockTarget)}` : '',
+        action: {loading: actionState.startsWith('block:')},
+        onClose: () => setBlockTarget(null),
+        onSubmit: submitBlockIp,
+      }) : null,
       h('div', {className: 'g11', style: {marginTop: 14}},
         h(TimelineCard, {events: payload.timeline}),
         h(ActionLogCard, {actions: payload.actions})
