@@ -236,3 +236,16 @@ Ordem correta para eliminar o legado:
 ## LEGACY_FRONTEND_DEBT
 
 O legado foi preservado para nao quebrar a demo enquanto a arquitetura React e introduzida. Ele nao deve virar permanente, mas tambem nao deve ser removido antes de paridade visual. Qualquer feature nova deve nascer em `frontend/src` e ser conectada ao shell atual com cuidado. A proxima fase deve migrar uma pagina por vez e comparar visualmente antes de remover navegacao imperativa, CSS inline ou scripts globais.
+
+## Visual Parity Migration Status
+
+As paginas ativas do dashboard agora carregam de `frontend/src/pages`, mantendo os mesmos roots, classes CSS, graficos, cards, tabelas e botoes do visual original:
+
+- Executive Overview: KPIs, posture score SVG, Chart.js alert volume, workqueue expansivel, filtros e service request.
+- Threat Detection: cards de alertas, graficos Chart.js, filtros, facetas, MITRE e tabela de alertas Wazuh.
+- Network / Endpoint: cards FortiGate/Wazuh, topologia SVG, agentes, correlacoes, blocklist e tabelas operacionais.
+- Incident Response: candidates, case queue, timeline, action log, Block IP, Unblock IP, FortiGate blocklist e evidence panel.
+- Compliance / Risk: tabela Evidence Coverage, disclaimer de auditoria, achados Wazuh e sem PCI DSS/porcentagens de certificacao como cards principais.
+- Cases & Response: listagem rica de casos, filtros, formulario, FortiGate block action, escalonamento, Jira e logs de resposta.
+
+O shell `frontend/dashboard.html` e `frontend/js/exec.js` ainda sao ativos por decisao de paridade visual. Eles so devem ser removidos quando um AppShell React reproduzir o mesmo header, tabs, spacing, estados globais e responsividade.

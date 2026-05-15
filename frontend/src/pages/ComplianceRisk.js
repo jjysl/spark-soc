@@ -1,1 +1,335 @@
-(function () { window.SparkPages = {...(window.SparkPages || {}), ComplianceRisk: window.ComplianceRisk || null}; })();
+(function () {
+  const {useEffect, useMemo, useState} = React;
+  const h = React.createElement;
+  const RANGES = ['24h', '7d', '30d'];
+  const api = window.SparkApi || {};
+
+  function fmtNum(value) {
+    return Number(value || 0).toLocaleString('en-US');
+  }
+
+  function fmtTime(value) {
+    return value && value.length >= 19 ? value.substring(0, 19).replace('T', ' ') : '--';
+  }
+
+  function KpiCard({label, value, detail, critical, tone}) {
+    return h('div', {className: `kpi ${critical ? 'ka' : ''}`},
+      h('div', {className: 'kl'}, label),
+      h('div', {className: 'kv', style: tone ? {color: `var(--${tone})`} : null}, value),
+      h('div', {className: 'kd', dangerouslySetInnerHTML: {__html: detail || ''}})
+    );
+  }
+
+  function RangeControl({value, onChange}) {
+    return h('div', {className: 'wq-filter'},
+      RANGES.map(range => h('button', {
+        key: range,
+        className: range === value ? 'active' : '',
+        onClick: () => onChange(range),
+      }, range))
+    );
+  }
+
+  function SourceChip({label, ok}) {
+    return h('span', {className: `source-chip ${ok ? 'ok' : 'warn'}`},
+      h('span', {className: 'source-dot'}),
+      `${label} ${ok ? 'Online' : 'Offline'}`
+    );
+  }
+
+  function EmptyState({title, detail}) {
+    return h('div', {className: 'cb'},
+      h('div', {style: {fontSize: 12, color: 'var(--t1)', fontWeight: 600, marginBottom: 4}}, title),
+      h('div', {style: {fontSize: 11, color: 'var(--tm)'}}, detail)
+    );
+  }
+
+  function EvidenceSourceOverview({payload}) {
+    const modules = payload.modules || {};
+    const agents = payload.agents || {};
+    const rows = [
+      {label: 'Endpoint Agents', value: fmtNum(agents.active || 0), detail: `${fmtNum(agents.total || 0)} monitored assets`, tone: Number(agents.active || 0) ? 'green' : 'amber'},
+      {label: 'Compliance Findings', value: fmtNum(payload.total_findings || 0), detail: `${fmtNum(payload.returned || 0)} evidence records returned`, tone: Number(payload.total_findings || 0) ? 'amber' : 'green'},
+      {label: 'Evidence Modules', value: fmtNum(Object.values(modules).filter(Boolean).length), detail: 'Wazuh modules with live records', tone: 'blue'},
+    ];
+    return h(React.Fragment, null,
+      h('div', {className: 'g4'},
+        rows.map(item => h(KpiCard, {
+          key: item.label,
+          label: item.label,
+          value: item.value,
+          detail: `<span class="${item.tone === 'green' ? 'dn' : 'up'}">${item.detail}</span>`,
+          tone: item.tone,
+        }))
+      ),
+      h('div', {className: 'card', style: {marginBottom: 14}},
+        h('div', {className: 'ch'},
+          h('div', null,
+            h('div', {className: 'ct'}, 'Evidence Sources by Module'),
+            h('div', {className: 'cs'}, 'Counts from live Wazuh telemetry; not certification scores')
+          )
+        ),
+        h('div', {className: 'cb'},
+          Object.entries(modules).map(([name, count]) => h('div', {className: 'apirow', key: name},
+            h('span', {className: `adot ${Number(count || 0) ? 'ok' : 'warn'}`}),
+            h('span', null, name),
+            h('span', {className: 'mono', style: {marginLeft: 'auto'}}, fmtNum(count || 0))
+          )),
+          h('div', {style: {fontSize: 11, color: 'var(--tm)', marginTop: 10}},
+            'SPARK shows auditable evidence availability and risk signals. It does not calculate certification percentages.'
+          )
+        )
+      )
+    );
+  }
+
+  function AssetRiskSegments({payload}) {
+    const modules = payload.modules || {};
+    const agents = payload.agents || {};
+    const rows = [
+      {name: 'Endpoint fleet', value: Math.min(100, Number(payload.total_findings || 0) * 12 + Number(agents.disconnected || 0) * 15), detail: 'findings + disconnected agents'},
+      {name: 'Identity / access', value: Math.min(100, Number(modules.audit || 0) * 14 + Number(modules.rootcheck || 0) * 8), detail: 'audit + rootcheck evidence'},
+      {name: 'Data integrity', value: Math.min(100, Number(modules.fim || 0) * 10), detail: 'FIM / syscheck evidence'},
+      {name: 'Vulnerability posture', value: Math.min(100, Number(modules.vulnerability || 0) * 18), detail: 'vulnerability detector evidence'},
+    ];
+    return h('div', {className: 'card'},
+      h('div', {className: 'ch'},
+        h('div', null,
+          h('div', {className: 'ct'}, 'Digital Asset Risk Score by Control Area'),
+          h('div', {className: 'cs'}, 'Risk estimate from live Wazuh compliance telemetry')
+        )
+      ),
+      h('div', {className: 'cb'},
+        rows.map(item => {
+          const color = item.value >= 70 ? '#da291c' : item.value >= 40 ? '#f59e0b' : '#10b981';
+          return h('div', {className: 'rseg', key: item.name},
+            h('div', {className: 'rsname'}, item.name),
+            h('div', {className: 'rsbar'}, h('div', {className: 'rsfill', style: {width: `${Math.max(4, item.value)}%`, background: color}})),
+            h('div', {className: 'rsval'}, item.value),
+            h('div', {style: {fontSize: 10, color: 'var(--tm)', minWidth: 120}}, item.detail)
+          );
+        })
+      )
+    );
+  }
+
+  function ControlCoverage({controls}) {
+    return h('div', {className: 'card'},
+      h('div', {className: 'ch'},
+        h('div', null,
+          h('div', {className: 'ct'}, 'Wazuh Compliance Modules'),
+          h('div', {className: 'cs'}, 'Counts from Wazuh rule groups, not framework percentages')
+        )
+      ),
+      h('div', {className: 'cb'},
+        controls.map(control => {
+          const count = Number(control.count || 0);
+          const width = Math.min(100, count ? Math.max(8, count * 8) : 0);
+          const color = count ? '#1a56db' : '#e2e5ea';
+          return h('div', {className: 'cbar', key: control.module},
+            h('div', {className: 'chead'},
+              h('span', null, control.name),
+              h('span', {className: 'cval'}, count ? `${fmtNum(count)} findings` : 'No data')
+            ),
+            h('div', {className: 'ctrack'}, h('div', {className: 'cfill', style: {width: `${width}%`, background: color}}))
+          );
+        })
+      )
+    );
+  }
+
+  function FindingTable({items}) {
+    const [expanded, setExpanded] = useState(false);
+    const visibleItems = expanded ? items : items.slice(0, 6);
+    return h('div', {className: 'card'},
+      h('div', {className: 'ch'},
+        h('div', null,
+          h('div', {className: 'ct'}, 'Recent Compliance Findings'),
+          h('div', {className: 'cs'}, 'SCA, FIM, rootcheck, vulnerability and audit alerts')
+        ),
+        h('div', {style: {display: 'flex', alignItems: 'center', gap: 8}},
+          h('span', {className: 'ca'}, `${fmtNum(visibleItems.length)}/${fmtNum(items.length)} shown`),
+          items.length > 6 ? h('button', {className: 'btn', onClick: () => setExpanded(value => !value)}, expanded ? 'Collapse' : 'View all') : null
+        )
+      ),
+      items.length ? h('div', {className: 'compact-list'},
+        visibleItems.map(item => {
+          const groups = Array.isArray(item.groups) ? item.groups.slice(0, 3).join(', ') : '';
+          return h('div', {className: 'compact-row', key: item.document_id || `${item.rule_id}-${item.timestamp}`},
+            h('div', {className: 'compact-main'},
+              h('div', {className: 'compact-title', title: item.description}, item.description || 'Wazuh finding'),
+              h('div', {className: 'compact-meta'},
+                h('span', {className: 'mono'}, fmtTime(item.timestamp)),
+                h('span', {className: 'tpill compact-pill', title: Array.isArray(item.groups) ? item.groups.join(', ') : ''}, groups || 'wazuh'),
+                h('span', {className: 'mono'}, item.agent_name || 'unknown'),
+                h('span', {className: 'mono'}, `rule ${item.rule_id || '--'}`)
+              )
+            ),
+            h('span', {className: `badge ${item.severity_class || 'binfo'}`}, item.level || 0)
+          );
+        })
+      ) : h(EmptyState, {
+        title: 'No compliance findings returned',
+        detail: 'This is expected until Wazuh SCA/FIM/rootcheck/vulnerability modules produce events for real endpoint agents.',
+      })
+    );
+  }
+
+  function AgentReadiness({agents, notes}) {
+    const items = agents?.items || [];
+    return h('div', {className: 'card'},
+      h('div', {className: 'ch'},
+        h('div', null,
+          h('div', {className: 'ct'}, 'Endpoint Readiness'),
+          h('div', {className: 'cs'}, 'Compliance telemetry depends on Wazuh endpoint agents')
+        ),
+        h('span', {className: 'badge binfo'}, `${fmtNum(agents?.total)} agents`)
+      ),
+      h('div', {className: 'cb'},
+        h('div', {className: 'apirow'}, h('span', {className: `adot ${agents?.active ? 'ok' : 'warn'}`}), h('span', null, 'Active agents'), h('span', {style: {marginLeft: 'auto'}}, fmtNum(agents?.active))),
+        h('div', {className: 'apirow'}, h('span', {className: `adot ${agents?.disconnected ? 'err' : 'ok'}`}), h('span', null, 'Disconnected agents'), h('span', {style: {marginLeft: 'auto'}}, fmtNum(agents?.disconnected))),
+        h('div', {className: 'apirow'}, h('span', {className: `adot ${agents?.pending ? 'warn' : 'ok'}`}), h('span', null, 'Pending agents'), h('span', {style: {marginLeft: 'auto'}}, fmtNum(agents?.pending))),
+        h('div', {style: {fontSize: 11, color: 'var(--tm)', marginTop: 10}}, notes?.agents || 'Install endpoint agents to populate SCA, FIM, rootcheck and vulnerability events.'),
+        items.length ? h('div', {style: {fontSize: 11, color: 'var(--tm)', marginTop: 8}}, `First agent: ${items[0].name || items[0].id || 'unknown'}`) : null
+      )
+    );
+  }
+
+  function MissingMappings({notes}) {
+    return h('div', {className: 'card'},
+      h('div', {className: 'ch'},
+        h('div', null,
+          h('div', {className: 'ct'}, 'Framework Evidence Notes'),
+          h('div', {className: 'cs'}, 'What is measured now and what requires audit mapping later')
+        )
+      ),
+      h('div', {className: 'cb'},
+        [
+          ['Framework scores', 'Current scores are estimated from Wazuh evidence and agent readiness; formal audit control mapping is roadmap work.'],
+          ['FortiGate policy posture', notes?.fortigate],
+          ['Evidence collection', 'Persist evidence snapshots and case links before generating audit-ready reports.'],
+        ].map(row => h('div', {className: 'pbstep', key: row[0]},
+          h('div', {className: 'pbicon pend'}, '!'),
+          h('div', null, h('div', {className: 'kct'}, row[0]), h('div', {className: 'kcs'}, row[1]))
+        ))
+      )
+    );
+  }
+
+  function ComplianceRiskApp() {
+    const [range, setRange] = useState('7d');
+    const [data, setData] = useState(null);
+    const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [updatedAt, setUpdatedAt] = useState(null);
+    const [message, setMessage] = useState('');
+
+    async function load() {
+      setLoading(true);
+      try {
+        const payload = await api.compliance.getComplianceRisk(range);
+        setData(payload);
+        setUpdatedAt(new Date());
+        setError('');
+      } catch (err) {
+        setError(err.message);
+        setData({
+          source: 'offline',
+          errors: {compliance: err.message},
+          total_findings: 0,
+          returned: 0,
+          modules: {},
+          controls: [],
+          findings: [],
+          agents: {total: 0, active: 0, disconnected: 0, pending: 0, items: []},
+          notes: {},
+        });
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    useEffect(() => {
+      load();
+      const timer = setInterval(load, 30000);
+      return () => clearInterval(timer);
+    }, [range]);
+
+    const payload = data || {
+      source: 'loading',
+      errors: {},
+      total_findings: 0,
+      returned: 0,
+      modules: {},
+      controls: [],
+      findings: [],
+      agents: {total: 0, active: 0, disconnected: 0, pending: 0, items: []},
+      notes: {},
+    };
+    const indexerOk = !payload.errors?.wazuh_indexer && payload.source !== 'loading';
+    const apiOk = !payload.errors?.wazuh_api && payload.source !== 'loading';
+    const status = useMemo(() => {
+      if (loading) return `Updating ${range} compliance telemetry...`;
+      if (updatedAt) return `Live source check - updated ${updatedAt.toLocaleTimeString('en-US')}`;
+      return 'Waiting for Wazuh compliance modules.';
+    }, [loading, updatedAt, range]);
+
+    function exportComplianceReport() {
+      const report = {
+        generated_at: new Date().toISOString(),
+        range,
+        evidence_sources: payload.modules || {},
+        modules: payload.modules || {},
+        findings: payload.findings || [],
+        agents: payload.agents || {},
+        note: 'Framework scores are evidence-based posture estimates, not formal audit attestations.',
+      };
+      const blob = new Blob([JSON.stringify(report, null, 2)], {type: 'application/json'});
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `spark-compliance-evidence-${range}-${Date.now()}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setMessage('Compliance evidence report exported as JSON.');
+    }
+
+    return h(React.Fragment, null,
+      h('div', {className: 'ph'},
+        h('div', null,
+          h('div', {className: 'ptitle'}, 'Compliance & Risk Management'),
+          h('div', {className: 'psub'}, h('span', {className: 'ldot'}), status)
+        ),
+        h('div', {className: 'ha'},
+          h(RangeControl, {value: range, onChange: setRange}),
+          h('button', {className: 'btn', onClick: () => setMessage('Report scheduling is handled outside the lab build; use Generate Report for evidence export.')}, 'Schedule Report'),
+          h('button', {className: 'btn btnp', onClick: exportComplianceReport}, 'Generate Report')
+        )
+      ),
+      h('div', {className: `aibox ${error ? 'loading' : ''}`},
+        h('strong', null, 'Compliance telemetry: '),
+        message || (error ? `API unavailable (${error}). No simulated compliance score is shown.` : 'Evidence coverage is generated from Wazuh modules and SPARK response evidence, not formal audit attestation.')
+      ),
+      h('div', {className: 'source-strip'},
+        h(SourceChip, {label: 'Wazuh Indexer', ok: indexerOk}),
+        h(SourceChip, {label: 'Wazuh Manager', ok: apiOk})
+      ),
+      h(EvidenceSourceOverview, {payload}),
+      h('div', {className: 'g11'},
+        h(ControlCoverage, {controls: payload.controls || []}),
+        h(AgentReadiness, {agents: payload.agents, notes: payload.notes})
+      ),
+      h('div', {className: 'g11'},
+        h(FindingTable, {items: payload.findings || []}),
+        h(MissingMappings, {notes: payload.notes || {}})
+      ),
+      window.SparkCompliance?.ComplianceEvidenceTable ? h(window.SparkCompliance.ComplianceEvidenceTable, {rows: []}) : null,
+      h(AssetRiskSegments, {payload})
+    );
+  }
+
+  const root = document.getElementById('compliance-root');
+  if (root) ReactDOM.createRoot(root).render(h(ComplianceRiskApp));
+})();
