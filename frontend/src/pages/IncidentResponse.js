@@ -432,7 +432,7 @@
       const steps = [
         ['Detect', 'Wazuh alert', `${fmtNum(payload.wazuh?.total)} alerts normalized for triage`, 'done'],
         ['Analyze', 'SPARK analysis', `${fmtNum(candidates.length)} prioritized candidates with MITRE context`, candidates.length ? 'active' : 'warn'],
-        ['Respond', 'FortiGate block', evidence ? `${evidence.object_name || 'Address object'} sent to FortiOS` : 'Ready for analyst action', evidence ? 'done' : 'active'],
+        ['Respond', 'FortiGate block', evidence ? `${containmentObjectName(evidence) || 'Address object'} sent to FortiOS` : 'Ready for analyst action', evidence ? 'done' : 'active'],
         ['Contain', 'Containment confidence', evidence ? `${score}% validated response checks` : `${fmtNum(blocklist.length)} active blocklist entries`, evidence ? 'done' : 'warn'],
         ['Document', 'Evidence generated', evidence?.evidence_id ? `Evidence ${evidence.evidence_id}` : 'Awaiting response evidence', evidence ? 'done' : 'warn'],
       ];
@@ -448,11 +448,12 @@
     function containmentScore(evidence) {
       if (!evidence) return 0;
       const fg = evidence.fortigate || {};
+      const status = String(evidence.status || evidence.evidence_status || '').toLowerCase();
       const checks = [
-        evidence.status === 'blocked',
-        Boolean(evidence.object_name || fg.object_created_or_updated),
-        Boolean(evidence.group_name || fg.group_updated),
-        Boolean(evidence.policy_name || fg.policy_present),
+        ['blocked', 'success', 'present'].includes(status),
+        Boolean(containmentObjectName(evidence) || fg.object_created_or_updated),
+        Boolean(containmentGroupName(evidence) || fg.group_updated),
+        Boolean(containmentPolicyName(evidence) || fg.policy_present),
         Boolean(evidence.evidence_id),
       ];
       return Math.round((checks.filter(Boolean).length / checks.length) * 100);
@@ -487,7 +488,7 @@
       return [
         ['Executive Summary', `${caseTitle(candidate)}. Severity ${candidate?.priority || candidate?.severity || '--'} with source ${caseIp(candidate) || evidence?.ip || '--'} targeting ${caseTarget(candidate)}.`],
         ['Technical Evidence', `Wazuh alerts: ${fmtNum(payload.wazuh?.total)}. Rule: ${candidate?.rule_id || '--'}. MITRE: ${caseMitre(candidate)}.`],
-        ['Response Actions', `FortiGate object ${evidence?.object_name || '--'} added to ${evidence?.group_name || 'SPARK_BLOCKLIST'} with policy ${evidence?.policy_name || 'SPARK_AUTO_BLOCK'}.`],
+        ['Response Actions', `FortiGate object ${containmentObjectName(evidence) || '--'} added to ${containmentGroupName(evidence) || 'SPARK_BLOCKLIST'} with policy ${containmentPolicyName(evidence) || 'SPARK_AUTO_BLOCK'}.`],
         ['Containment Proof', `Evidence ID ${evidence?.evidence_id || '--'}. Containment confidence ${score}%. Status ${evidence?.status || 'Awaiting response evidence'}.`],
         ['Compliance Evidence', 'Technical evidence is available for analyst review and auditor handoff. This is not automatic certification.'],
         ['Next Steps', 'Validate traffic-path enforcement, review related alerts, update the case owner and attach Evidence Pack to the customer workspace.'],
@@ -586,7 +587,157 @@
     const cases = payload.cases || [];
     const counts = payload.wazuh?.counts || {};
     const briefingCandidate = candidates[0] || cases[0] || {};
-    const latestAction = (payload.actions || [])[0] || {};
+
+    function sanitizeOperationalText(value) {
+      if (value === undefined || value === null) return '';
+      let text = String(value);
+      const hasFortiGateVariable = /FORTIGATE_(API_KEY|BASE_URL)/i.test(text);
+      const hasAiVariable = /GROQ_API_KEY|ANTHROPIC_API_KEY|AI_PROVIDER/i.test(text);
+      if (hasFortiGateVariable) return 'FortiGate connector is unavailable in this workspace.';
+      if (hasAiVariable) return 'AI briefing connector is unavailable in this workspace.';
+      return text
+        .replace(/\.env/gi, 'workspace configuration')
+        .replace(/localhost/gi, 'local connector endpoint')
+        .replace(/127\.0\.0\.1/g, 'local connector endpoint');
+    }
+
+    function sanitizeOperationalObject(value) {
+      if (Array.isArray(value)) return value.map(sanitizeOperationalObject);
+      if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sanitizeOperationalObject(item)]));
+      }
+      return typeof value === 'string' ? sanitizeOperationalText(value) : value;
+    }
+
+    function containmentObjectName(evidence) {
+      return evidence?.object_name || evidence?.fortigate_object || evidence?.object || '';
+    }
+
+    function containmentGroupName(evidence) {
+      return evidence?.group_name || evidence?.fortigate_group || evidence?.group || '';
+    }
+
+    function containmentPolicyName(evidence) {
+      return evidence?.policy_name || evidence?.fortigate_policy || evidence?.policy || '';
+    }
+
+    function isBlockEvidence(item) {
+      if (!item) return false;
+      const status = String(item.status || item.evidence_status || '').toLowerCase();
+      const action = String(item.action || item.type || '').toLowerCase();
+      const hasFortiGateEvidence = Boolean(containmentObjectName(item) || containmentGroupName(item) || containmentPolicyName(item) || item.evidence_id);
+      return hasFortiGateEvidence && (status === 'blocked' || status === 'success' || action.includes('block')) && !action.includes('unblock');
+    }
+
+    function normalizeContainmentEvidence(item, source) {
+      if (!item) return null;
+      const ip = item.ip || item.source_ip || item.src_ip || caseIp(item);
+      const objectName = containmentObjectName(item);
+      const groupName = containmentGroupName(item) || 'SPARK_BLOCKLIST';
+      const policyName = containmentPolicyName(item) || 'SPARK_AUTO_BLOCK';
+      return sanitizeOperationalObject({
+        ...item,
+        ip,
+        source_context: source,
+        status: item.status || 'blocked',
+        reason: item.reason || item.message || item.title || 'Analyst containment action',
+        object_name: objectName,
+        fortigate_object: objectName,
+        group_name: groupName,
+        fortigate_group: groupName,
+        policy_name: policyName,
+        fortigate_policy: policyName,
+        evidence_id: item.evidence_id || '',
+      });
+    }
+
+    function latestContainmentEvidence(forceLatestContainment) {
+      if (isBlockEvidence(lastEvidence)) return normalizeContainmentEvidence(lastEvidence, 'latest_block_result');
+      const actions = Array.isArray(payload.actions) ? payload.actions : [];
+      const action = actions.find(isBlockEvidence);
+      if (action) return normalizeContainmentEvidence(action, 'response_action_log');
+      if (forceLatestContainment && blocklist.length) return normalizeContainmentEvidence(blocklist[0], 'fortigate_blocklist');
+      return null;
+    }
+
+    function buildBriefingContext(forceLatestContainment) {
+      const containmentEvidence = latestContainmentEvidence(forceLatestContainment);
+      const fallbackIncident = {
+        title: containmentEvidence?.ip ? `Containment action for ${containmentEvidence.ip}` : 'Security event requires analyst review',
+        severity: containmentEvidence ? (containmentEvidence.severity || 'high') : 'Requires analyst review',
+        source_ip: containmentEvidence?.ip || '',
+        target: 'monitored asset',
+        mitre: '',
+      };
+      const incident = containmentEvidence
+        ? {
+          ...fallbackIncident,
+          incident_id: containmentEvidence.incident_id || containmentEvidence.case_id || containmentEvidence.evidence_id || '',
+          title: containmentEvidence.reason || fallbackIncident.title,
+          severity: containmentEvidence.severity || fallbackIncident.severity,
+          source_ip: containmentEvidence.ip || fallbackIncident.source_ip,
+          target: containmentEvidence.target || containmentEvidence.target_asset || caseTarget(briefingCandidate) || fallbackIncident.target,
+          mitre: caseMitre(containmentEvidence) || '',
+          rule_id: containmentEvidence.rule_id || containmentEvidence.wazuh_rule || '',
+          alert_count: containmentEvidence.alert_count || '',
+        }
+        : (briefingCandidate && Object.keys(briefingCandidate).length ? briefingCandidate : fallbackIncident);
+      const evidence = containmentEvidence || {};
+      const checks = containmentChecks(containmentEvidence);
+      const okChecks = checks.filter(item => item.ok).length;
+      const hasContainment = Boolean(containmentEvidence);
+      const confidence = hasContainment
+        ? `${okChecks}/${checks.length}`
+        : 'Containment has not been verified yet.';
+      const actionLog = (payload.actions || []).slice(0, 5).map(item => sanitizeOperationalObject({
+        action: item.action || '',
+        status: item.status || '',
+        ip: item.ip || item.source_ip || '',
+        object_name: containmentObjectName(item),
+        group_name: containmentGroupName(item),
+        policy_name: containmentPolicyName(item),
+        evidence_id: item.evidence_id || '',
+        message: item.message || item.enforcement_path || '',
+        timestamp: item.timestamp || item.time || '',
+      }));
+      if (containmentEvidence && !actionLog.find(item => item.evidence_id && item.evidence_id === containmentEvidence.evidence_id)) {
+        actionLog.unshift({
+          action: 'block_ip',
+          status: containmentEvidence.status || 'blocked',
+          ip: containmentEvidence.ip || '',
+          object_name: containmentObjectName(containmentEvidence),
+          group_name: containmentGroupName(containmentEvidence),
+          policy_name: containmentPolicyName(containmentEvidence),
+          evidence_id: containmentEvidence.evidence_id || '',
+          message: containmentEvidence.reason || 'FortiGate containment evidence recorded.',
+          timestamp: containmentEvidence.timestamp || containmentEvidence.created_at || '',
+        });
+      }
+      const timelineEvents = (payload.timeline || []).slice(0, 6).map(item => sanitizeOperationalObject({
+        stage: item.stage || item.title || item.action || '',
+        status: item.status || '',
+        detail: item.detail || item.message || item.description || '',
+        timestamp: item.timestamp || item.time || '',
+      }));
+      if (containmentEvidence) {
+        timelineEvents.unshift({
+          stage: 'Contain',
+          status: containmentEvidence.status || 'blocked',
+          detail: `FortiGate object ${containmentObjectName(containmentEvidence) || '--'} added to ${containmentGroupName(containmentEvidence) || 'SPARK_BLOCKLIST'}.`,
+          timestamp: containmentEvidence.timestamp || containmentEvidence.created_at || '',
+        });
+      }
+      return {
+        incident: sanitizeOperationalObject(incident),
+        evidence: sanitizeOperationalObject(evidence),
+        checks,
+        okChecks,
+        confidence,
+        hasContainment,
+        actionLog,
+        timelineEvents,
+      };
+    }
 
     function briefingSectionsFromPayload(briefing) {
       const value = briefing || {};
@@ -599,22 +750,31 @@
       ];
     }
 
-    function deterministicBriefingPayload() {
-      const evidence = lastEvidence || {};
-      const score = containmentScore(lastEvidence);
-      const checks = containmentChecks(lastEvidence);
-      const rule = briefingCandidate.rule_id || latestAction.rule_id || '--';
-      const alerts = payload.wazuh?.total || payload.wazuh?.candidate_count || 0;
+    function deterministicBriefingPayload(context) {
+      const selected = context || buildBriefingContext(false);
+      const evidence = selected.evidence || {};
+      const incident = selected.incident || {};
+      const rule = incident.rule_id || incident.wazuh_rule || evidence.wazuh_rule || '--';
+      const alerts = incident.alert_count || evidence.alert_count || (selected.hasContainment ? '' : (payload.wazuh?.total || payload.wazuh?.candidate_count || 0));
+      const containmentPhrase = selected.hasContainment
+        ? `Containment confidence is ${selected.confidence} based on FortiGate object, blocklist, policy and evidence confirmation.`
+        : 'No containment action has been executed for this incident yet. Containment has not been verified yet.';
       return {
         provider: aiProvider.provider || 'none',
         model: aiProvider.model || 'provider-default',
         source: 'fallback',
         briefing: {
-          executive_summary: `${caseTitle(briefingCandidate)} is prioritized as ${briefingCandidate.priority || briefingCandidate.severity || 'analyst review'} with source ${caseIp(briefingCandidate) || evidence.ip || '--'} and target ${caseTarget(briefingCandidate)}.`,
-          severity_rationale: `${briefingCandidate.priority || briefingCandidate.severity || 'Requires analyst review'} based on Wazuh rule ${rule}, ${fmtNum(alerts)} alert(s), and current incident context.`,
-          response_taken: `FortiGate object ${evidence.object_name || evidence.fortigate_object || '--'}, group ${evidence.group_name || evidence.fortigate_group || 'SPARK_BLOCKLIST'}, policy ${evidence.policy_name || evidence.fortigate_policy || 'SPARK_AUTO_BLOCK'}, evidence ${evidence.evidence_id || '--'}.`,
-          containment_status: `${score}% containment confidence; ${checks.filter(item => item.ok).length}/${checks.length} checks validated.`,
-          recommended_next_steps: ['Validate traffic-path enforcement.', `Review Wazuh rule ${rule} and correlated alerts.`, 'Attach Evidence Pack to the case.', 'Assign case owner.'],
+          executive_summary: `${caseTitle(incident)} is prioritized as ${incident.priority || incident.severity || 'analyst review'} with source ${caseIp(incident) || evidence.ip || '--'} and target ${caseTarget(incident)}.`,
+          severity_rationale: rule !== '--'
+            ? `${incident.priority || incident.severity || 'Requires analyst review'} based on Wazuh rule ${rule}${alerts !== '' ? `, ${fmtNum(alerts)} alert(s),` : ''} and current incident context.`
+            : `${incident.priority || incident.severity || 'Requires analyst review'} based on current incident context and analyst evidence.`,
+          response_taken: selected.hasContainment
+            ? `FortiGate object ${containmentObjectName(evidence) || '--'}, group ${containmentGroupName(evidence) || 'SPARK_BLOCKLIST'}, policy ${containmentPolicyName(evidence) || 'SPARK_AUTO_BLOCK'}, evidence ${evidence.evidence_id || '--'}.`
+            : 'No containment action has been executed for this incident yet.',
+          containment_status: containmentPhrase,
+          recommended_next_steps: selected.hasContainment
+            ? ['Validate traffic-path enforcement.', rule !== '--' ? `Review Wazuh rule ${rule} and correlated alerts.` : 'Review correlated alerts.', 'Attach Evidence Pack to the case.', 'Assign case owner.']
+            : ['Review correlated alerts.', 'Decide whether containment is required.', 'Configure or validate the FortiGate connector for this workspace.', 'Attach analyst notes to the case.'],
         },
       };
     }
@@ -628,81 +788,71 @@
       ].join('\n');
     }
 
-    async function generateAiBriefing() {
-      const evidence = lastEvidence || {};
-      const score = containmentScore(lastEvidence);
-      const checks = containmentChecks(lastEvidence);
-      const concreteMitre = caseMitre(briefingCandidate);
-      const actionLog = (payload.actions || []).slice(0, 5).map(item => ({
-        action: item.action || '',
-        status: item.status || '',
-        ip: item.ip || item.source_ip || '',
-        object_name: item.object_name || item.fortigate_object || '',
-        evidence_id: item.evidence_id || '',
-        message: item.message || item.enforcement_path || '',
-        timestamp: item.timestamp || item.time || '',
-      }));
-      const timelineEvents = (payload.timeline || []).slice(0, 6).map(item => ({
-        stage: item.stage || item.title || item.action || '',
-        status: item.status || '',
-        detail: item.detail || item.message || item.description || '',
-        timestamp: item.timestamp || item.time || '',
-      }));
+    async function generateAiBriefing(forceLatestContainment) {
+      const context = buildBriefingContext(Boolean(forceLatestContainment));
+      const evidence = context.evidence || {};
+      const incident = context.incident || {};
+      const concreteMitre = caseMitre(incident);
       const requestPayload = {
-        incident_id: briefingCandidate.case_id || briefingCandidate.caseId || briefingCandidate.id || briefingCandidate.document_id || '',
-        title: caseTitle(briefingCandidate),
-        severity: briefingCandidate.priority || briefingCandidate.severity || 'Requires analyst review',
-        source_ip: caseIp(briefingCandidate) || evidence.ip || '',
-        target: caseTarget(briefingCandidate),
+        incident_id: incident.case_id || incident.caseId || incident.id || incident.document_id || incident.incident_id || evidence.incident_id || evidence.evidence_id || '',
+        title: caseTitle(incident),
+        severity: incident.priority || incident.severity || 'Requires analyst review',
+        source_ip: caseIp(incident) || evidence.ip || '',
+        target: caseTarget(incident),
         mitre: concreteMitre,
-        wazuh_rule: briefingCandidate.rule_id || latestAction.rule_id || '',
-        alert_count: payload.wazuh?.total || payload.wazuh?.candidate_count || candidates.length || 0,
-        fortigate_object: evidence.object_name || evidence.fortigate_object || latestAction.object_name || '',
-        fortigate_group: evidence.group_name || evidence.fortigate_group || latestAction.group_name || '',
-        fortigate_policy: evidence.policy_name || evidence.fortigate_policy || latestAction.policy_name || '',
+        wazuh_rule: incident.rule_id || incident.wazuh_rule || evidence.wazuh_rule || '',
+        alert_count: incident.alert_count || evidence.alert_count || (context.hasContainment ? '' : (payload.wazuh?.total || payload.wazuh?.candidate_count || candidates.length || 0)),
+        fortigate_object: containmentObjectName(evidence),
+        fortigate_group: containmentGroupName(evidence),
+        fortigate_policy: containmentPolicyName(evidence),
         wazuh_evidence: {
-          alerts_in_range: payload.wazuh?.total || 0,
-          rule_id: briefingCandidate.rule_id || '',
-          document_id: briefingCandidate.document_id || '',
-          agent_name: briefingCandidate.agent_name || '',
-          agent_ip: briefingCandidate.agent_ip || '',
-          level: briefingCandidate.level || '',
-          description: briefingCandidate.description || briefingCandidate.title || '',
+          alerts_in_range: context.hasContainment ? '' : (payload.wazuh?.total || 0),
+          rule_id: incident.rule_id || incident.wazuh_rule || '',
+          document_id: incident.document_id || '',
+          agent_name: incident.agent_name || '',
+          agent_ip: incident.agent_ip || '',
+          level: incident.level || '',
+          description: incident.description || incident.title || '',
         },
         evidence: {
           ...evidence,
-          wazuh_rule: briefingCandidate.rule_id || latestAction.rule_id || '',
-          alert_count: payload.wazuh?.total || payload.wazuh?.candidate_count || candidates.length || 0,
-          fortigate_object: evidence.object_name || evidence.fortigate_object || latestAction.object_name || '',
-          fortigate_group: evidence.group_name || evidence.fortigate_group || latestAction.group_name || '',
-          fortigate_policy: evidence.policy_name || evidence.fortigate_policy || latestAction.policy_name || '',
-          containment_confidence: `${checks.filter(item => item.ok).length}/${checks.length}`,
-          containment_checks: checks,
+          wazuh_rule: incident.rule_id || incident.wazuh_rule || evidence.wazuh_rule || '',
+          alert_count: incident.alert_count || evidence.alert_count || (context.hasContainment ? '' : (payload.wazuh?.total || payload.wazuh?.candidate_count || candidates.length || 0)),
+          fortigate_object: containmentObjectName(evidence),
+          fortigate_group: containmentGroupName(evidence),
+          fortigate_policy: containmentPolicyName(evidence),
+          containment_confidence: context.confidence,
+          containment_checks: context.checks,
         },
-        evidence_id: evidence.evidence_id || latestAction.evidence_id || '',
-        containment_confidence: `${checks.filter(item => item.ok).length}/${checks.length}`,
-        containment_checks: checks,
-        response_action_log: actionLog,
-        timeline_events: timelineEvents,
-        recommended_next_steps: ['Validate traffic-path enforcement.', 'Review correlated alerts.', 'Attach Evidence Pack to the case.'],
+        evidence_id: evidence.evidence_id || '',
+        containment_confidence: context.confidence,
+        containment_checks: context.checks,
+        response_action_log: context.actionLog,
+        timeline_events: context.timelineEvents,
+        containment_note: context.hasContainment ? '' : 'No containment action has been executed for this incident yet.',
+        recommended_next_steps: context.hasContainment
+          ? ['Validate traffic-path enforcement.', 'Review correlated alerts.', 'Attach Evidence Pack to the case.']
+          : ['Review correlated alerts.', 'Decide whether containment is required.', 'Use FortiGate containment if the event requires network response.'],
       };
       setAiBriefingLoading(true);
       try {
         const result = api.incidents.generateIncidentBriefing
           ? await api.incidents.generateIncidentBriefing(requestPayload)
-          : deterministicBriefingPayload();
+          : deterministicBriefingPayload(context);
         const sections = briefingSectionsFromPayload(result.briefing);
-        setAiBriefing({sections, text: briefingText(result, sections), generatedAt: new Date(), source: result.source, provider: result.provider, model: result.model});
+        const cleanSections = sections.map(([title, body]) => [title, sanitizeOperationalText(body)]);
+        setAiBriefing({sections: cleanSections, text: sanitizeOperationalText(briefingText(result, cleanSections)), generatedAt: new Date(), source: result.source, provider: result.provider, model: result.model});
         toast.pushToast({
           tone: result.source === 'ai-live' ? 'success' : 'warn',
           title: result.source === 'ai-live' ? 'AI briefing generated' : 'Fallback briefing generated',
-          message: result.source === 'ai-live' ? `${result.provider} generated the briefing.` : 'Deterministic fallback kept the briefing available.',
+          message: context.hasContainment ? 'Briefing used latest containment evidence.' : 'Briefing used selected incident context.',
         });
       } catch (err) {
-        const result = deterministicBriefingPayload();
+        const result = deterministicBriefingPayload(context);
         const sections = briefingSectionsFromPayload(result.briefing);
-        setAiBriefing({sections, text: briefingText(result, sections), generatedAt: new Date(), source: 'fallback', provider: result.provider, model: result.model});
-        toast.pushToast({tone: 'warn', title: 'Fallback briefing generated', message: `AI connector unavailable: ${err.message}`});
+        const cleanSections = sections.map(([title, body]) => [title, sanitizeOperationalText(body)]);
+        setAiBriefing({sections: cleanSections, text: sanitizeOperationalText(briefingText(result, cleanSections)), generatedAt: new Date(), source: 'fallback', provider: result.provider, model: result.model});
+        toast.pushToast({tone: 'warn', title: 'Fallback briefing generated', message: 'Deterministic fallback kept the briefing available.'});
       } finally {
         setAiBriefingLoading(false);
       }
@@ -727,6 +877,8 @@
         toast.pushToast({tone: 'error', title: 'Briefing copy unavailable', message: err.message});
       }
     }
+
+    const latestContainmentForUi = latestContainmentEvidence(false);
 
     function AiBriefingCard({briefing}) {
       if (!briefing) return null;
@@ -762,7 +914,8 @@
         h('div', {className: 'ha'},
           h(RangeControl, {value: range, onChange: setRange}),
           h('button', {className: 'btn', onClick: load, disabled: loading}, loading ? 'Refreshing...' : 'Refresh'),
-          h('button', {className: 'btn', onClick: generateAiBriefing, disabled: aiBriefingLoading}, aiBriefingLoading ? 'Generating...' : 'Generate AI Briefing'),
+          h('button', {className: 'btn', onClick: () => generateAiBriefing(false), disabled: aiBriefingLoading}, aiBriefingLoading ? 'Generating...' : 'Generate AI Briefing'),
+          latestContainmentForUi ? h('button', {className: 'btn', onClick: () => generateAiBriefing(true), disabled: aiBriefingLoading}, aiBriefingLoading ? 'Generating...' : 'Briefing from latest containment') : null,
           h('button', {className: 'btn btnp', onClick: () => document.querySelector('button[onclick*="jira"]')?.click()}, 'Cases & Response')
         )
       ),
