@@ -270,8 +270,8 @@
     const apiOk = !payload.errors?.wazuh_api && payload.source !== 'loading';
     const status = useMemo(() => {
       if (loading) return `Updating ${range} compliance telemetry...`;
-      if (updatedAt) return `Live source check - updated ${updatedAt.toLocaleTimeString('en-US')}`;
-      return 'Waiting for Wazuh compliance modules.';
+      if (updatedAt) return `Live source check - updated ${updatedAt.toLocaleTimeString('pt-BR', {hour12: false, timeZone: 'America/Sao_Paulo'})} BRT`;
+      return 'Awaiting evidence coverage telemetry.';
     }, [loading, updatedAt, range]);
 
     function exportComplianceReport() {
@@ -282,7 +282,7 @@
         modules: payload.modules || {},
         findings: payload.findings || [],
         agents: payload.agents || {},
-        note: 'Framework scores are evidence-based posture estimates, not formal audit attestations.',
+        note: 'Evidence coverage is generated for auditor review and is not automatic certification.',
       };
       const blob = new Blob([JSON.stringify(report, null, 2)], {type: 'application/json'});
       const url = URL.createObjectURL(blob);
@@ -304,13 +304,13 @@
         ),
         h('div', {className: 'ha'},
           h(RangeControl, {value: range, onChange: setRange}),
-          h('button', {className: 'btn', onClick: () => setMessage('Report scheduling is handled outside the lab build; use Generate Report for evidence export.')}, 'Schedule Report'),
+          h('button', {className: 'btn', onClick: () => setMessage('Report scheduling is available through the MDR service workflow. Use Generate Report for evidence export.')}, 'Schedule Report'),
           h('button', {className: 'btn btnp', onClick: exportComplianceReport}, 'Generate Report')
         )
       ),
       h('div', {className: `aibox ${error ? 'loading' : ''}`},
         h('strong', null, 'Compliance telemetry: '),
-        message || (error ? `API unavailable (${error}). No simulated compliance score is shown.` : 'Evidence coverage is generated from Wazuh modules and SPARK response evidence, not formal audit attestation.')
+        message || (error ? `Integration unavailable in this environment. ${error}` : 'Evidence coverage is generated from Wazuh modules and SPARK response evidence for auditor review.')
       ),
       h('div', {className: 'source-strip'},
         h(SourceChip, {label: 'Wazuh Indexer', ok: indexerOk}),

@@ -54,12 +54,12 @@
           h('div', {className: 'ct'}, 'FortiGate Monitor API'),
           h('div', {className: 'cs'}, '/api/v2/monitor/system/resource/usage')
         ),
-        h('span', {className: `badge ${ok ? 'blive' : 'bhigh'}`}, ok ? 'Connected' : 'Unavailable')
+        h('span', {className: `badge ${ok ? 'blive' : 'bhigh'}`}, ok ? 'Connected' : 'Connector unavailable')
       ),
       h('div', {className: 'cb'},
         h('div', {className: 'fgrid'},
-          h(MetricTile, {label: 'CPU', value: ok ? `${cpu}%` : 'N/A', detail: ok ? 'Current utilization' : 'Waiting for FortiGate API', tone: cpu >= 80 ? 'red' : cpu >= 60 ? 'amber' : 'green'}),
-          h(MetricTile, {label: 'Memory', value: ok ? `${mem}%` : 'N/A', detail: ok ? 'Current utilization' : 'Waiting for FortiGate API', tone: mem >= 80 ? 'red' : mem >= 60 ? 'amber' : 'green'}),
+          h(MetricTile, {label: 'CPU', value: ok ? `${cpu}%` : 'N/A', detail: ok ? 'Current utilization' : 'Awaiting FortiGate connector', tone: cpu >= 80 ? 'red' : cpu >= 60 ? 'amber' : 'green'}),
+          h(MetricTile, {label: 'Memory', value: ok ? `${mem}%` : 'N/A', detail: ok ? 'Current utilization' : 'Awaiting FortiGate connector', tone: mem >= 80 ? 'red' : mem >= 60 ? 'amber' : 'green'}),
           h(MetricTile, {label: 'Active Sessions', value: ok ? fmtNum(sessions) : 'N/A', detail: ok ? 'Reported by resource usage endpoint' : 'Session count unavailable'}),
           h(MetricTile, {label: 'FortiOS', value: system.version || fortigate?.version || 'N/A', detail: system.serial || fortigate?.serial || 'System status endpoint'})
         )
@@ -83,7 +83,7 @@
           rows.map(([key, item]) => h('tr', {key},
             h('td', null, key.replaceAll('_', ' ')),
             h('td', null, h('span', {className: 'mono'}, item.endpoint || '--')),
-            h('td', null, h('span', {className: `badge ${item.ok ? 'blive' : 'bhigh'}`, title: item.error || ''}, item.ok ? 'Live' : 'Unavailable'))
+            h('td', null, h('span', {className: `badge ${item.ok ? 'blive' : 'bhigh'}`, title: item.error || ''}, item.ok ? 'Live' : 'Connector unavailable'))
           ))
         )
       ) : h(EmptyState, {title: 'No FortiOS API evidence returned', detail: 'Check the FortiGate API token and network reachability.'})
@@ -166,7 +166,7 @@
           h(MetricTile, {label: 'Address Group', value: group.name || 'SPARK_BLOCKLIST', detail: `${fmtNum(members.length)} members`}),
           h(MetricTile, {label: 'SPARK Objects', value: fmtNum(sparkObjects.length), detail: 'SPARK_BLOCK_* address objects'}),
           h(MetricTile, {label: 'Policy', value: policyPresent ? 'Present' : 'Missing', detail: 'SPARK_BLOCKLIST_DENY'}),
-          h(MetricTile, {label: 'Enforcement', value: 'Pending', detail: 'Network routing validation'})
+          h(MetricTile, {label: 'Containment', value: 'Requires Review', detail: 'Traffic-path validation'})
         ),
         members.length ? h('table', {className: 'ftable'},
           h('thead', null, h('tr', null, ['Group Member', 'Derived IP', 'Action'].map(col => h('th', {key: col}, col)))),
@@ -310,7 +310,7 @@
           h('div', {className: 'ct'}, 'Wazuh Endpoint Inventory'),
           h('div', {className: 'cs'}, 'Manager API /agents')
         ),
-        h('span', {className: `badge ${ok ? 'blive' : 'bhigh'}`}, ok ? `${fmtNum(wazuh?.total)} agents` : 'Unavailable')
+        h('span', {className: `badge ${ok ? 'blive' : 'bhigh'}`}, ok ? `${fmtNum(wazuh?.total)} agents` : 'unavailable')
       ),
       agents.length ? h('table', {className: 'ftable'},
         h('thead', null, h('tr', null, ['ID', 'Name', 'IP', 'Status', 'Version'].map(col => h('th', {key: col}, col)))),
@@ -324,8 +324,8 @@
           ))
         )
       ) : h(EmptyState, {
-        title: ok ? 'No endpoint agents returned' : 'Wazuh Manager API unavailable',
-        detail: ok ? 'Only real Wazuh agents will appear here. The manager-only lab may show zero or one manager record.' : 'Check WAZUH_BASE, WAZUH_USER and WAZUH_PASS on the lab machine.',
+        title: ok ? 'No endpoint agents returned' : 'Wazuh Manager integration unavailable in this environment',
+        detail: ok ? 'Registered Wazuh agents will appear here when telemetry is available.' : 'Connector credentials or network path require analyst review.',
       })
     );
   }
@@ -372,7 +372,7 @@
         h('div', {className: 'apirow'}, h('span', {className: `adot ${fgOk ? 'ok' : 'err'}`}), h('span', null, 'FortiGate Monitor API'), h('span', {style: {marginLeft: 'auto', color: fgOk ? 'var(--green)' : 'var(--amber)'}}, fgOk ? 'online' : 'offline')),
         h('div', {className: 'apirow'}, h('span', {className: `adot ${wzOk ? 'ok' : 'err'}`}), h('span', null, 'Wazuh Manager API'), h('span', {style: {marginLeft: 'auto', color: wzOk ? 'var(--green)' : 'var(--amber)'}}, wzOk ? 'online' : 'offline')),
         h('div', {className: 'apirow'}, h('span', {className: `adot ${agents.length ? 'ok' : 'warn'}`}), h('span', null, 'Registered endpoint agents'), h('span', {style: {marginLeft: 'auto'}}, fmtNum(agents.length))),
-        h('div', {style: {fontSize: 11, color: 'var(--tm)', marginTop: 10}}, 'Protocol distribution, anomalous links and UEBA will remain unavailable until validated telemetry exists. No simulated topology is rendered.')
+        h('div', {style: {fontSize: 11, color: 'var(--tm)', marginTop: 10}}, 'Protocol distribution, anomalous links and UEBA remain in review until validated telemetry is available.')
       )
     );
   }
@@ -465,8 +465,8 @@
 
     const statusText = useMemo(() => {
       if (loading) return 'Updating FortiGate and Wazuh telemetry...';
-      if (updatedAt) return `Live source check - updated ${updatedAt.toLocaleTimeString('en-US')}`;
-      return 'Waiting for live source status.';
+      if (updatedAt) return `Live source check - updated ${updatedAt.toLocaleTimeString('pt-BR', {hour12: false, timeZone: 'America/Sao_Paulo'})} BRT`;
+      return 'Awaiting telemetry from connected sources.';
     }, [loading, updatedAt]);
 
     return h(React.Fragment, null,
@@ -482,17 +482,17 @@
       ),
       h('div', {className: `aibox ${error ? 'loading' : ''}`},
         h('strong', null, 'Network telemetry: '),
-        message || (error ? `API unavailable (${error}). No simulated network data is shown.` : 'Rendering only FortiGate Monitor API, Wazuh Manager API and SPARK-owned records.')
+        message || (error ? `Integration unavailable in this environment. ${error}` : 'Rendering FortiGate, Wazuh and SPARK-owned response evidence.')
       ),
       h('div', {className: 'source-strip'},
         h(SourceChip, {label: 'FortiGate', ok: fgOk}),
         h(SourceChip, {label: 'Wazuh Agents', ok: wzOk})
       ),
       h('div', {className: 'g4'},
-        h(KpiCard, {label: 'Active Sessions', value: fgOk ? fmtNum(payload.fortigate?.sessions) : 'N/A', detail: fgOk ? '<span class="dn">FortiGate resource usage</span>' : '<span class="up">FortiGate offline</span>'}),
-        h(KpiCard, {label: 'FortiGate CPU', value: fgOk ? `${payload.fortigate?.cpu || 0}%` : 'N/A', detail: fgOk ? 'Current utilization' : 'Waiting for Monitor API'}),
-        h(KpiCard, {label: 'Firewall Policies', value: fgOk ? fmtNum(payload.fortigate?.policies?.length) : 'N/A', detail: fgOk ? '<span class="dn">FortiOS CMDB</span>' : '<span class="up">Policy API offline</span>'}),
-        h(KpiCard, {label: 'Monitored Agents', value: wzOk ? fmtNum(payload.wazuh?.total) : 'N/A', detail: wzOk ? `<span class="dn">${fmtNum(payload.wazuh?.active)} active</span>` : '<span class="up">Wazuh API offline</span>'})
+        h(KpiCard, {label: 'Active Sessions', value: fgOk ? fmtNum(payload.fortigate?.sessions) : 'N/A', detail: fgOk ? '<span class="dn">FortiGate resource usage</span>' : '<span class="up">FortiGate connector unavailable</span>'}),
+        h(KpiCard, {label: 'FortiGate CPU', value: fgOk ? `${payload.fortigate?.cpu || 0}%` : 'N/A', detail: fgOk ? 'Current utilization' : 'Awaiting Monitor API telemetry'}),
+        h(KpiCard, {label: 'Firewall Policies', value: fgOk ? fmtNum(payload.fortigate?.policies?.length) : 'N/A', detail: fgOk ? '<span class="dn">FortiOS CMDB</span>' : '<span class="up">Policy connector unavailable</span>'}),
+        h(KpiCard, {label: 'Monitored Agents', value: wzOk ? fmtNum(payload.wazuh?.total) : 'N/A', detail: wzOk ? `<span class="dn">${fmtNum(payload.wazuh?.active)} active</span>` : '<span class="up">Wazuh connector unavailable</span>'})
       ),
       h('div', {className: 'g11'},
         h(FortiGateMetrics, {fortigate: payload.fortigate, ok: fgOk}),

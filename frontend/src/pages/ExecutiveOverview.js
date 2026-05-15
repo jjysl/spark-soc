@@ -28,14 +28,14 @@
     if (!value) return '--:--';
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value.length >= 16 ? value.substring(11, 16) : '--:--';
-    return date.toLocaleTimeString('en-US', {hour12: false, hour: '2-digit', minute: '2-digit'});
+    return `${date.toLocaleTimeString('pt-BR', {hour12: false, hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo'})} BRT`;
   }
 
   function fmtDateTime(value) {
     if (!value) return '';
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleString('en-US', {month: 'short', day: '2-digit', year: 'numeric', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit'});
+    return `${date.toLocaleString('pt-BR', {day: '2-digit', month: 'short', year: 'numeric', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'America/Sao_Paulo'})} BRT`;
   }
 
   function TimeSelector({value, onChange, disabled}) {
@@ -80,7 +80,7 @@
       ),
       h('div', {className: 'aibox loading'},
         h('strong', null, 'SPARK Live Triage: '),
-        error ? `Failed to fetch /spark/executive-overview (${error}).` : 'Collecting live telemetry. The view will populate when the first snapshot is ready.'
+        error ? `Executive telemetry unavailable in this environment. ${error}` : 'Collecting live telemetry. The view will populate when the first snapshot is ready.'
       ),
       h('div', {className: 'source-strip'},
         h(SourceBadge, {label: 'Wazuh', loading: true}),
@@ -88,8 +88,8 @@
         h(SourceBadge, {label: 'Shuffle', loading: true})
       ),
       h('div', {className: 'g21'},
-        h('div', {className: 'card'}, h('div', {className: 'ch'}, h('div', null, h('div', {className: 'ct'}, 'Security Posture Score'), h('div', {className: 'cs'}, 'Waiting for live snapshot'))), h('div', {className: 'cb'}, h('div', {className: 'skel', style: {height: 140}}, '...'))),
-        h('div', {className: 'card'}, h('div', {className: 'ch'}, h('div', null, h('div', {className: 'ct'}, 'Alert Volume - Last 24h'), h('div', {className: 'cs'}, 'Waiting for Wazuh Indexer'))), h('div', {className: 'cb'}, h('div', {className: 'skel', style: {height: 140}}, '...')))
+        h('div', {className: 'card'}, h('div', {className: 'ch'}, h('div', null, h('div', {className: 'ct'}, 'Security Posture Score'), h('div', {className: 'cs'}, 'Awaiting live posture snapshot'))), h('div', {className: 'cb'}, h('div', {className: 'skel', style: {height: 140}}, '...'))),
+        h('div', {className: 'card'}, h('div', {className: 'ch'}, h('div', null, h('div', {className: 'ct'}, 'Alert Volume - Last 24h'), h('div', {className: 'cs'}, 'Awaiting Wazuh Indexer telemetry'))), h('div', {className: 'cb'}, h('div', {className: 'skel', style: {height: 140}}, '...')))
       )
     );
   }
@@ -207,7 +207,7 @@
           setActionState(payload.message || `${item.caseId} updated`);
           onCaseUpdate && onCaseUpdate();
         }).catch(error => {
-          setActionState(`Update failed: ${error.message}`);
+          setActionState(`Case update unavailable: ${error.message}`);
           console.error(error);
         });
       }
@@ -561,7 +561,7 @@
       h('div', {className: 'ph'},
         h('div', null,
           h('div', {className: 'ptitle'}, 'Executive Overview'),
-          h('div', {className: 'psub'}, h('span', {className: 'ldot'}), loading ? `Updating ${range} telemetry...` : updatedAt ? `Live - updated ${updatedAt.toLocaleTimeString('en-US')}` : 'Syncing live sources...')
+          h('div', {className: 'psub'}, h('span', {className: 'ldot'}), loading ? `Updating ${range} telemetry...` : updatedAt ? `Live - updated ${updatedAt.toLocaleTimeString('pt-BR', {hour12: false, timeZone: 'America/Sao_Paulo'})} BRT` : 'Awaiting telemetry from connected sources')
         ),
         h('div', {className: 'ha'},
           h(TimeSelector, {value: range, onChange: setRange}),
@@ -572,13 +572,13 @@
       h('div', {className: 'krow'},
         h(KpiCard, {label: 'P1 - Critical Incidents', value: fmtNum(kpis.critical_incidents), detail: `<span class="up">${fmtNum(kpis.events ?? kpis.events_24h)}</span> alerts ${data?.range || range}`, critical: true}),
         h(KpiCard, {label: 'MTTD', value: kpis.mttd || 'N/A', detail: `<span class="dn">${kpis.mttd_detail || 'Incident lifecycle unavailable'}</span>`}),
-        h(KpiCard, {label: 'MTTR', value: kpis.mttr || 'N/A', detail: status.shuffle ? `<span class="dn">${kpis.mttr_detail || 'Waiting for resolved tickets'}</span>` : '<span class="up">Shuffle partial</span>'}),
+        h(KpiCard, {label: 'MTTR', value: kpis.mttr || 'N/A', detail: status.shuffle ? `<span class="dn">${kpis.mttr_detail || 'Awaiting resolved case evidence'}</span>` : '<span class="up">Shuffle partial</span>'}),
         h(KpiCard, {label: 'SLA Compliance', value: kpis.sla_compliance == null ? 'N/A' : `${kpis.sla_compliance}%`, detail: `<span class="dn">${kpis.sla_detail || 'No measurable alerts'} - target ${kpis.sla_target || 95}%</span>`, tone: 'green'}),
         h(KpiCard, {label: 'Monitored Assets', value: fmtNum(kpis.monitored_assets), detail: `<span class="up">${fmtNum(kpis.assets_alerting)}</span> in alert state`})
       ),
       h('div', {className: 'aibox'},
         h('strong', null, 'SPARK Live Triage: '),
-        message ? message : error ? `update error (${error}). Keeping last state.` : (data?.triage || 'Loading live telemetry...')
+        message ? message : error ? `Integration unavailable in this environment. Keeping last known state. ${error}` : (data?.triage || 'Loading live telemetry...')
       ),
       h('div', {className: 'source-strip'},
         h(SourceBadge, {label: 'Wazuh', ok: status.wazuh}),

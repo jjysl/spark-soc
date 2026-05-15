@@ -131,12 +131,12 @@
               h('span', null, 'Object'), h('strong', null, lastAction.object || '--'),
               h('span', null, 'Group'), h('strong', null, lastAction.group || '--'),
               h('span', null, 'Policy'), h('strong', null, lastAction.policy_found ? `${lastAction.policy} found` : `${lastAction.policy || 'policy'} missing`),
-              h('span', null, 'Enforcement'), h('strong', null, lastAction.enforcement_path || 'pending network routing validation')
+              h('span', null, 'Containment'), h('strong', null, lastAction.enforcement_path || 'Containment pending traffic-path validation')
             )
           ) : null,
           !value.id ? h('label', {style: {display: 'flex', gap: 8, alignItems: 'center', fontSize: 11, color: 'var(--t2)'}} ,
             h('input', {type: 'checkbox', checked: Boolean(value.syncJira), disabled: !jiraReady, onChange: e => update('syncJira', e.target.checked)}),
-            jiraReady ? 'Also sync to Jira on save' : 'Jira sync unavailable'
+            jiraReady ? 'Also sync to Jira on save' : 'Jira connector unavailable'
           ) : null,
           value.externalKey ? h('a', {href: value.externalUrl || '#', target: '_blank', rel: 'noreferrer', className: 'btn'}, `Open ${value.externalKey}`) : null,
           h('button', {className: 'jm-submit', disabled: saving || !value.title, onClick: onSubmit}, saving ? 'Saving...' : 'Save Case'),
@@ -157,7 +157,7 @@
           h('div', {className: 'ct'}, 'Optional Jira Integration'),
           h('div', {className: 'cs'}, 'External issue sync; SPARK cases remain the primary SOC record')
         ),
-        h('span', {className: `badge ${connected ? 'blive' : configured ? 'bhigh' : 'binfo'}`}, connected ? 'Connected' : configured ? 'Configured' : 'Not configured')
+        h('span', {className: `badge ${connected ? 'blive' : configured ? 'bhigh' : 'binfo'}`}, connected ? 'Connected' : configured ? 'Configured' : 'Connector not configured')
       ),
       h('div', {className: 'jira-status-grid'},
         h('div', {className: 'detail-cell'}, h('div', {className: 'detail-label'}, 'Project'), h('div', {className: 'detail-value'}, jira?.project || 'SPARK')),
@@ -166,7 +166,7 @@
         h('div', {className: 'detail-cell'}, h('div', {className: 'detail-label'}, 'Project API'), h('div', {className: 'detail-value'}, jira?.project_status || '--')),
         h('button', {className: 'btn', onClick: onRefresh}, 'Check')
       ),
-      h('div', {style: {padding: '0 16px 14px', fontSize: 11, color: configured ? 'var(--t2)' : 'var(--amber)'}}, jira?.message || 'Configure JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN and JIRA_PROJECT_KEY.')
+      h('div', {style: {padding: '0 16px 14px', fontSize: 11, color: configured ? 'var(--t2)' : 'var(--amber)'}}, jira?.message || 'Jira connector credentials are not configured for this workspace.')
     );
   }
 
@@ -195,8 +195,8 @@
     }
 
     useEffect(() => {
-      load().catch(err => setMessage(`Ticket API unavailable: ${err.message}`));
-      const refresh = () => load().catch(err => setMessage(`Ticket API unavailable: ${err.message}`));
+      load().catch(err => setMessage(`Case workspace unavailable: ${err.message}`));
+      const refresh = () => load().catch(err => setMessage(`Case workspace unavailable: ${err.message}`));
       window.addEventListener('spark:tickets-refresh', refresh);
       return () => window.removeEventListener('spark:tickets-refresh', refresh);
     }, []);
@@ -265,7 +265,7 @@
 
     return h(React.Fragment, null,
       h('div', {className: 'ph'},
-        h('div', null, h('div', {className: 'ptitle'}, 'Cases & Response'), h('div', {className: 'psub'}, h('span', {className: 'ldot'}), updatedAt ? `SOC case store - updated ${updatedAt.toLocaleTimeString('en-US')}` : 'SOC case store')),
+        h('div', null, h('div', {className: 'ptitle'}, 'Cases & Response'), h('div', {className: 'psub'}, h('span', {className: 'ldot'}), updatedAt ? `Case workspace - updated ${updatedAt.toLocaleTimeString('pt-BR', {hour12: false, timeZone: 'America/Sao_Paulo'})} BRT` : 'Case workspace')),
         h('div', {className: 'ha'}, h('button', {className: 'btn', onClick: load}, 'Refresh'), h('button', {className: 'btn btnj', onClick: () => { setLastAction(null); setEditing(emptyTicket()); }}, 'New Case'))
       ),
       h('div', {className: 'jira-stats'},
@@ -284,7 +284,7 @@
           h('select', {className: 'jira-filter-sel', value: filters.type, onChange: e => setFilters({...filters, type: e.target.value})}, h('option', {value: ''}, 'All types'), TYPES.map(type => h('option', {value: type, key: type}, type))),
           h('select', {className: 'jira-filter-sel', value: filters.assignee, onChange: e => setFilters({...filters, assignee: e.target.value})}, h('option', {value: ''}, 'All assignees'), assignees.map(name => h('option', {value: name, key: name}, name)))
         ),
-        h('div', {style: {fontSize: 11, color: 'var(--tm)'}}, updatedAt ? `Last sync: ${updatedAt.toLocaleTimeString('en-US')}` : 'Not synced')
+        h('div', {style: {fontSize: 11, color: 'var(--tm)'}}, updatedAt ? `Last sync: ${updatedAt.toLocaleTimeString('pt-BR', {hour12: false, timeZone: 'America/Sao_Paulo'})} BRT` : 'Awaiting sync')
       ),
       h(Board, {tickets, filters, onEdit: ticket => setEditing({...ticket})}),
       h('div', {className: 'g11'},
@@ -306,7 +306,7 @@
         }),
         h(LogTable, {
           title: 'FortiGate Action Evidence',
-          subtitle: 'Configuration API evidence; runtime enforcement pending network routing validation',
+          subtitle: 'Configuration API evidence; containment pending traffic-path validation',
           badge: `${actionEvents.length} entries`,
           rows: actionEvents,
           empty: 'No FortiGate response actions recorded.',

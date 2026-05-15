@@ -36,22 +36,23 @@
     if (!value) return '--:--:--';
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value.length >= 19 ? value.substring(11, 19) : '--:--:--';
-    return date.toLocaleTimeString('en-US', {hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit'});
+    return `${date.toLocaleTimeString('pt-BR', {hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'America/Sao_Paulo'})} BRT`;
   }
 
   function fmtDateTime(value) {
     if (!value) return '';
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleString('en-US', {
-      month: 'short',
+    return `${date.toLocaleString('pt-BR', {
       day: '2-digit',
+      month: 'short',
       year: 'numeric',
       hour12: false,
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
-    });
+      timeZone: 'America/Sao_Paulo',
+    })} BRT`;
   }
 
   function shortTactic(value) {
@@ -654,7 +655,7 @@
           facets: {tactics: [], decoders: []},
           timeline: [],
           alerts: [],
-          triage: `Threat Detection API unavailable: ${err.message}`,
+          triage: `Threat Detection integration unavailable in this environment. ${err.message}`,
         });
       } finally {
         setLoading(false);
@@ -667,7 +668,7 @@
       return () => clearInterval(timer);
     }, [range, query]);
 
-    const payload = data || {source: 'loading', total: 0, counts: {}, facets: {tactics: [], decoders: []}, timeline: [], alerts: [], triage: 'Loading Wazuh Indexer alerts.'};
+    const payload = data || {source: 'loading', total: 0, counts: {}, facets: {tactics: [], decoders: []}, timeline: [], alerts: [], triage: 'Awaiting Wazuh Indexer telemetry.'};
     const live = payload.source === 'opensearch-live';
     const scopedAlerts = useMemo(() => applyLocalAlertFilters(payload.alerts || [], filters, searchInput), [payload.alerts, filters, searchInput]);
 
@@ -687,7 +688,7 @@
       toolPanel === 'rule' ? h(TriageRulePanel, {filters, rules: triageRules, setRules: setTriageRules}) : null,
       h('div', {className: `aibox ${live ? '' : 'loading'}`},
         h('strong', null, 'SPARK Threat Triage: '),
-        error ? `${payload.triage} Keeping the page free of fallback mock data.` : payload.triage
+        error ? payload.triage : payload.triage
       ),
       h(RiskCorrelationPanel, {analytics: payload.analytics, onFilter: addFilter}),
       h('div', {className: 'g12', style: {alignItems: 'start'}},
