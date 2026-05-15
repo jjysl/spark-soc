@@ -463,6 +463,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
   <button class="tbtn" onclick="switchTab('ir',this)">Incident Response</button>
   <button class="tbtn" onclick="switchTab('compliance',this)">Compliance &amp; Risk</button>
   <button class="tbtn" onclick="switchTab('jira',this)">Cases &amp; Response</button>
+  <button class="tbtn" onclick="switchTab('product',this)">Product</button>
 </nav>
 
 <section class="product-strip" aria-label="SPARK SOC operating model">
@@ -557,6 +558,15 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
     <div class="aibox loading"><strong>Cases &amp; Response:</strong> Awaiting case workspace data.</div>
   </div>
 </div>
+<div class="panel" id="panel-product">
+  <div id="product-root">
+    <div class="ph">
+      <div><div class="ptitle">Product &amp; Onboarding</div><div class="psub"><span class="ldot"></span>MDR workspace model, plans and customer onboarding journey</div></div>
+      <div class="ha"><button class="btn" disabled>Request Demo</button><button class="btn btnp" disabled>Start Onboarding</button></div>
+    </div>
+    <div class="aibox loading"><strong>Product workspace:</strong> Loading SPARK SOC product experience.</div>
+  </div>
+</div>
 </main>
 <footer class="footer">
   <div>SPARK SOC — MDR Command Center &nbsp;·&nbsp; NG-SOC as a Service &nbsp;·&nbsp; Team: Diogo, José, Júlio, Matheus, Rafael</div>
@@ -603,5 +613,6 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
 <script src="/src/pages/IncidentResponse.js"></script>
 <script src="/src/pages/ComplianceRisk.js"></script>
 <script src="/src/pages/Cases.js"></script>
+<script src="/src/pages/ProductExperience.js"></script>
 </body>
 </html>

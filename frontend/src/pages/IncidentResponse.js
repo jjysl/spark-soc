@@ -11,7 +11,26 @@
   }
 
   function fmtTime(value) {
-    return value && value.length >= 19 ? value.substring(11, 19) : '--:--:--';
+    if (!value) return '--:--:--';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value.length >= 19 ? value.substring(11, 19) : '--:--:--';
+    return `${date.toLocaleTimeString('pt-BR', {hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'America/Sao_Paulo'})} BRT`;
+  }
+
+  async function copyText(text) {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', 'readonly');
+    area.style.position = 'fixed';
+    area.style.left = '-9999px';
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand('copy');
+    document.body.removeChild(area);
   }
 
   function priorityClass(priority) {
@@ -54,11 +73,19 @@
   }
 
   function caseIp(item) {
-    return item?.src_ip || item?.agent_ip || '';
+    return item?.src_ip || item?.source_ip || item?.agent_ip || '';
   }
 
   function caseTitle(item) {
     return item?.title || item?.description || 'Wazuh alert';
+  }
+
+  function caseTarget(item) {
+    return item?.target || item?.target_asset || item?.agent_name || item?.agent_ip || 'monitored asset';
+  }
+
+  function caseMitre(item) {
+    return item?.mitre || item?.mitre_technique || item?.technique || 'Requires analyst review';
   }
 
   function CandidateTable({items, onCreateCase, onBlock, actionState}) {
@@ -278,6 +305,7 @@
     const [lastEvidence, setLastEvidence] = useState(null);
     const [blocklist, setBlocklist] = useState([]);
     const [blockTarget, setBlockTarget] = useState(null);
+    const [aiBriefing, setAiBriefing] = useState(null);
     const toast = hooks.useToast ? hooks.useToast() : {pushToast: () => {}};
 
     async function load() {
@@ -391,12 +419,13 @@
     }
 
     function SparkTrace({payload, evidence}) {
+      const score = containmentScore(evidence);
       const steps = [
-        ['Detect', 'Wazuh alert', `${fmtNum(payload.wazuh?.total)} alerts in range`, 'done'],
-        ['Analyze', 'Prioritize', `${fmtNum(candidates.length)} candidates`, candidates.length ? 'active' : 'warn'],
-        ['Respond', 'FortiGate API', evidence ? 'Containment action executed' : 'Ready for analyst action', evidence ? 'done' : 'active'],
-        ['Contain', 'SPARK_BLOCKLIST', evidence?.group_name || `${fmtNum(blocklist.length)} blocked IPs`, evidence ? 'done' : 'warn'],
-        ['Document', 'Evidence Pack', evidence?.evidence_id ? `Evidence ${evidence.evidence_id}` : 'Awaiting response evidence', evidence ? 'done' : 'warn'],
+        ['Detect', 'Wazuh alert', `${fmtNum(payload.wazuh?.total)} alerts normalized for triage`, 'done'],
+        ['Analyze', 'SPARK analysis', `${fmtNum(candidates.length)} prioritized candidates with MITRE context`, candidates.length ? 'active' : 'warn'],
+        ['Respond', 'FortiGate block', evidence ? `${evidence.object_name || 'Address object'} sent to FortiOS` : 'Ready for analyst action', evidence ? 'done' : 'active'],
+        ['Contain', 'Containment confidence', evidence ? `${score}% validated response checks` : `${fmtNum(blocklist.length)} active blocklist entries`, evidence ? 'done' : 'warn'],
+        ['Document', 'Evidence generated', evidence?.evidence_id ? `Evidence ${evidence.evidence_id}` : 'Awaiting response evidence', evidence ? 'done' : 'warn'],
       ];
       return h('div', {className: 'spark-trace'},
         steps.map(([label, title, detail, state]) => h('div', {className: `trace-step ${state}`, key: label},
@@ -405,6 +434,19 @@
           h('div', {className: 'trace-detail'}, detail)
         ))
       );
+    }
+
+    function containmentScore(evidence) {
+      if (!evidence) return 0;
+      const fg = evidence.fortigate || {};
+      const checks = [
+        evidence.status === 'blocked',
+        Boolean(evidence.object_name || fg.object_created_or_updated),
+        Boolean(evidence.group_name || fg.group_updated),
+        Boolean(evidence.policy_name || fg.policy_present),
+        Boolean(evidence.evidence_id),
+      ];
+      return Math.round((checks.filter(Boolean).length / checks.length) * 100);
     }
 
     function ContainmentConfidence({evidence}) {
@@ -427,22 +469,36 @@
       );
     }
 
-    function EvidencePack({evidence, payload}) {
+    function evidencePackSections(evidence, payload, candidate) {
+      const score = containmentScore(evidence);
+      return [
+        ['Executive Summary', `${caseTitle(candidate)}. Severity ${candidate?.priority || candidate?.severity || '--'} with source ${caseIp(candidate) || evidence?.ip || '--'} targeting ${caseTarget(candidate)}.`],
+        ['Technical Evidence', `Wazuh alerts: ${fmtNum(payload.wazuh?.total)}. Rule: ${candidate?.rule_id || '--'}. MITRE: ${caseMitre(candidate)}.`],
+        ['Response Actions', `FortiGate object ${evidence?.object_name || '--'} added to ${evidence?.group_name || 'SPARK_BLOCKLIST'} with policy ${evidence?.policy_name || 'SPARK_AUTO_BLOCK'}.`],
+        ['Containment Proof', `Evidence ID ${evidence?.evidence_id || '--'}. Containment confidence ${score}%. Status ${evidence?.status || 'Awaiting response evidence'}.`],
+        ['Compliance Evidence', 'Technical evidence is available for analyst review and auditor handoff. This is not automatic certification.'],
+        ['Next Steps', 'Validate traffic-path enforcement, review related alerts, update the case owner and attach Evidence Pack to the customer workspace.'],
+      ];
+    }
+
+    function buildEvidencePackText(evidence, payload, candidate) {
+      return evidencePackSections(evidence, payload, candidate)
+        .map(([title, body]) => `${title}\n${body}`)
+        .join('\n\n');
+    }
+
+    function EvidencePack({evidence, payload, candidate, onCopy}) {
+      const sections = evidencePackSections(evidence, payload, candidate);
       return h('div', {className: 'card'},
-        h('div', {className: 'ch'}, h('div', null, h('div', {className: 'ct'}, 'Evidence Pack'), h('div', {className: 'cs'}, 'Audit-ready response summary for MDR handoff'))),
+        h('div', {className: 'ch'},
+          h('div', null, h('div', {className: 'ct'}, 'Evidence Pack'), h('div', {className: 'cs'}, 'Audit-ready response summary for MDR handoff')),
+          h('button', {className: 'btn', onClick: onCopy}, 'Copy Evidence Pack')
+        ),
         h('div', {className: 'cb evidence-pack'},
-          h('div', {className: 'response-evidence ok'},
-            h('div', {className: 'response-title'}, 'FortiGate Evidence'),
-            h('div', {className: 'response-grid'},
-              [['IP', evidence?.ip], ['Evidence ID', evidence?.evidence_id], ['Object', evidence?.object_name], ['Group', evidence?.group_name], ['Policy', evidence?.policy_name], ['Status', evidence?.status]].map(row => h(React.Fragment, {key: row[0]}, h('span', null, row[0]), h('strong', null, row[1] || '--')))
-            )
-          ),
-          h('div', {className: 'response-evidence'},
-            h('div', {className: 'response-title'}, 'Detection Evidence'),
-            h('div', {className: 'response-grid'},
-              [['Wazuh alerts', fmtNum(payload.wazuh?.total)], ['Candidates', fmtNum(candidates.length)], ['Shuffle', payload.shuffle?.connected ? 'online' : 'offline'], ['Blocklist IPs', fmtNum(blocklist.length)]].map(row => h(React.Fragment, {key: row[0]}, h('span', null, row[0]), h('strong', null, row[1] || '--')))
-            )
-          )
+          sections.map(([title, body]) => h('div', {className: `response-evidence ${title === 'Containment Proof' && evidence ? 'ok' : ''}`, key: title},
+            h('div', {className: 'response-title'}, title),
+            h('p', {className: 'evidence-copy'}, body)
+          ))
         )
       );
     }
@@ -516,6 +572,69 @@
     const candidates = payload.wazuh?.candidates || [];
     const cases = payload.cases || [];
     const counts = payload.wazuh?.counts || {};
+    const briefingCandidate = candidates[0] || cases[0] || {};
+
+    function generateAiBriefing() {
+      const evidence = lastEvidence || {};
+      const score = containmentScore(lastEvidence);
+      const sections = [
+        ['Executive Summary', `${caseTitle(briefingCandidate)} is prioritized as ${briefingCandidate.priority || briefingCandidate.severity || 'analyst review'} with source ${caseIp(briefingCandidate) || evidence.ip || '--'} and target ${caseTarget(briefingCandidate)}.`],
+        ['Severity', briefingCandidate.priority || briefingCandidate.severity || 'Requires analyst review'],
+        ['MITRE Technique', caseMitre(briefingCandidate)],
+        ['Wazuh Evidence', `${fmtNum(payload.wazuh?.total)} alerts in ${range}; rule ${briefingCandidate.rule_id || '--'}; document ${briefingCandidate.document_id || '--'}.`],
+        ['FortiGate Response', `Object ${evidence.object_name || '--'}, group ${evidence.group_name || 'SPARK_BLOCKLIST'}, policy ${evidence.policy_name || 'SPARK_AUTO_BLOCK'}, evidence ${evidence.evidence_id || '--'}.`],
+        ['Containment Confidence', `${score}% based on FortiGate API, address object, blocklist, policy and evidence checks.`],
+        ['Recommended Next Steps', 'Validate traffic-path enforcement, review correlated alerts, document customer impact, assign case owner and attach the Evidence Pack to the workspace.'],
+      ];
+      const text = [
+        'AI Incident Briefing',
+        'Generated by SPARK deterministic briefing engine when an AI connector is unavailable.',
+        '',
+        ...sections.map(([title, body]) => `${title}: ${body}`),
+      ].join('\n');
+      setAiBriefing({sections, text, generatedAt: new Date()});
+      toast.pushToast({tone: 'success', title: 'AI briefing generated', message: 'Executive and operational summary is ready for analyst review.'});
+    }
+
+    async function copyEvidencePack() {
+      try {
+        const text = buildEvidencePackText(lastEvidence, payload, briefingCandidate);
+        await copyText(text);
+        toast.pushToast({tone: 'success', title: 'Evidence Pack copied', message: 'Structured evidence is ready for handoff.'});
+      } catch (err) {
+        toast.pushToast({tone: 'error', title: 'Evidence Pack copy unavailable', message: err.message});
+      }
+    }
+
+    async function copyAiBriefing() {
+      if (!aiBriefing?.text) return;
+      try {
+        await copyText(aiBriefing.text);
+        toast.pushToast({tone: 'success', title: 'AI briefing copied', message: 'Briefing copied to clipboard.'});
+      } catch (err) {
+        toast.pushToast({tone: 'error', title: 'Briefing copy unavailable', message: err.message});
+      }
+    }
+
+    function AiBriefingCard({briefing}) {
+      if (!briefing) return null;
+      return h('div', {className: 'card ai-briefing-card'},
+        h('div', {className: 'ch'},
+          h('div', null,
+            h('div', {className: 'ct'}, 'AI Incident Briefing'),
+            h('div', {className: 'cs'}, `Generated ${briefing.generatedAt.toLocaleTimeString('pt-BR', {hour12: false, timeZone: 'America/Sao_Paulo'})} BRT with deterministic fallback when an AI connector is unavailable`)
+          ),
+          h('button', {className: 'btn', onClick: copyAiBriefing}, 'Copy Briefing')
+        ),
+        h('div', {className: 'cb briefing-grid'},
+          briefing.sections.map(([title, body]) => h('div', {className: 'briefing-item', key: title},
+            h('div', {className: 'response-title'}, title),
+            h('p', null, body)
+          ))
+        )
+      );
+    }
+
     const status = useMemo(() => {
       if (loading) return `Updating ${range} response telemetry...`;
       if (updatedAt) return `Live source check - updated ${updatedAt.toLocaleTimeString('pt-BR', {hour12: false, timeZone: 'America/Sao_Paulo'})} BRT`;
@@ -531,6 +650,7 @@
         h('div', {className: 'ha'},
           h(RangeControl, {value: range, onChange: setRange}),
           h('button', {className: 'btn', onClick: load, disabled: loading}, loading ? 'Refreshing...' : 'Refresh'),
+          h('button', {className: 'btn', onClick: generateAiBriefing}, 'Generate AI Briefing'),
           h('button', {className: 'btn btnp', onClick: () => document.querySelector('button[onclick*="jira"]')?.click()}, 'Cases & Response')
         )
       ),
@@ -545,9 +665,10 @@
       ),
       h(components.LoadingState && loading && !data ? components.LoadingState : React.Fragment, loading && !data ? {title: 'Loading response telemetry', detail: 'Collecting candidates, cases, and action evidence.'} : null),
       h('div', {className: 'g11'},
-        lastEvidence && window.SparkIncident?.EvidencePanel ? h(window.SparkIncident.EvidencePanel, {evidence: lastEvidence}) : h(EvidencePack, {evidence: lastEvidence, payload}),
+        h(EvidencePack, {evidence: lastEvidence, payload, candidate: briefingCandidate, onCopy: copyEvidencePack}),
         h(ContainmentConfidence, {evidence: lastEvidence})
       ),
+      h(AiBriefingCard, {briefing: aiBriefing}),
       h('div', {className: 'g4'},
         h(KpiCard, {label: 'Incident Candidates', value: fmtNum(candidates.length), detail: `<span class="up">${fmtNum(payload.wazuh?.total)}</span> Wazuh alerts in range`, critical: candidates.length > 0}),
         h(KpiCard, {label: 'P1 Candidates', value: fmtNum(counts.p1), detail: 'Wazuh level >= 12'}),
