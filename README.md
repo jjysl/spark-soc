@@ -1,115 +1,120 @@
 # SPARK SOC
 
-NG-SOC as a Service e MDR Command Center para demonstracoes executivas e operacao SOC.
+SPARK SOC is an NG-SOC / MDR command center for organizations that need managed detection, incident response, containment evidence and executive visibility without building a full SOC from scratch.
 
-## Estrutura
-
-```text
-backend/      Flask blueprints e clientes Wazuh/FortiGate/Shuffle/IA
-frontend/     HTML estático, JS legado e ilhas React
-scripts/      automações locais de tunnel/start/stop
-data/         runtime local do SQLite (ignorado no Git)
-```
-
-`config.py` é local e fica fora do Git por conter credenciais do lab. Para uma
-nova máquina, copie `config.example.py` para `config.py` e preencha os tokens.
-
-## Rodar local com Wazuh Indexer via SSH tunnel
-
-O Wazuh Indexer fica protegido dentro da VM em `localhost:9200`. No Windows/host,
-quando o backend roda localmente, o SPARK acessa ele por um tunnel em
-`https://localhost:19200`.
-
-1. Ligue a VM Wazuh/Shuffle no VMware.
-2. Confirme que o host alcança a VM em `192.168.50.20` e que SSH responde na porta `22`.
-3. Suba o tunnel:
-
-```powershell
-.\scripts\start-indexer-tunnel.ps1
-```
-
-4. Teste:
-
-```powershell
-$cred = Get-Credential -UserName admin
-Invoke-WebRequest -Uri https://localhost:19200 -Credential $cred -SkipCertificateCheck
-```
-
-5. Rode o Flask:
-
-```powershell
-python backend/app.py
-```
-
-Ou suba tunnel + Flask de uma vez:
-
-```powershell
-.\scripts\start-spark.ps1
-```
-
-Defaults do lab VMware quando o backend roda dentro da VM Wazuh/Shuffle:
-
-```powershell
-$env:WAZUH_BASE="https://192.168.50.20:55000"
-$env:SHUFFLE_BASE_URL="http://192.168.50.20:3001"
-$env:SHUFFLE_BACKEND_URL="http://192.168.50.20:5001"
-$env:INDEXER_BASE="https://localhost:9200"
-$env:FORTIGATE_BASE_URL="https://192.168.50.40"
-```
-
-Para encerrar o tunnel:
-
-```powershell
-.\scripts\stop-indexer-tunnel.ps1
-```
-
-## Deploy no VMware Lab
-
-O Windows/VS Code é a fonte oficial do código. Não edite arquivos manualmente
-em `/opt/spark-soc` na VM Wazuh, porque isso deixa o ambiente fora do controle
-de versão.
-
-Arquitetura do lab:
+The platform connects security telemetry, SOAR automation and firewall containment into one operational workflow:
 
 ```text
-Windows host / navegador: 192.168.50.1
-Wazuh + Shuffle VM:      192.168.50.20
-Agent/client VM:         192.168.50.30
-FortiGate SOC IP:        192.168.50.40
-Dashboard:               http://192.168.50.20:5000
-Shuffle frontend:        http://192.168.50.20:3001
-Shuffle backend/API:     http://192.168.50.20:5001
-Wazuh API:               https://192.168.50.20:55000
-Wazuh Indexer na VM:     https://localhost:9200
+Detect -> Decide -> Respond -> Contain -> Document
 ```
 
-Fluxo recomendado:
+## What SPARK SOC Delivers
 
-1. Desenvolva e commite no Windows.
-2. Rode o deploy pelo PowerShell a partir da raiz do projeto:
+- Unified SOC dashboard for Wazuh, FortiGate, Shuffle SOAR and endpoint telemetry.
+- Real FortiGate containment through address objects, blocklist group updates and policy enforcement.
+- Incident Response workspace with AI Incident Briefing, SPARK Trace, Evidence Pack and Containment Confidence.
+- Executive Overview for service health, active incidents, integration status and response activity.
+- Compliance / Risk evidence view focused on auditable technical evidence, not automatic certification claims.
+- Product onboarding and plans page for MDR / NG-SOC as a Service positioning.
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-vmware.ps1
+## Console Areas
+
+### Executive Overview
+
+The executive screen summarizes the MDR workspace posture:
+
+- SOC health and active incident indicators.
+- Integration health for Wazuh Manager, Wazuh Indexer, FortiGate, Shuffle and Agent.
+- Alert volume, workqueue, open cases and response activity.
+- Live operational signals for the current workspace.
+
+### Threat Detection
+
+Threat Detection focuses on Wazuh telemetry and analyst triage:
+
+- Wazuh alerts with rule ID, severity, source IP and target asset.
+- MITRE technique when available from telemetry.
+- Filters and visual summaries for analyst review.
+- Candidate incidents that can move into response workflows.
+
+### Network / Endpoint
+
+Network / Endpoint gives the analyst the infrastructure and containment view:
+
+- Wazuh agents and endpoint status.
+- FortiGate, Shuffle and Indexer operational status.
+- FortiGate SPARK blocklist entries.
+- Correlation between blocked IPs and recorded evidence.
+- Unblock workflow for containment cleanup.
+
+### Incident Response
+
+Incident Response is the main analyst workspace:
+
+- Incident candidate queue and case lifecycle actions.
+- Block IP / Unblock IP through FortiGate.
+- SPARK Trace: Detect, Analyze, Respond, Contain and Document.
+- Evidence Pack with executive summary, technical evidence, response actions and compliance evidence.
+- Containment Confidence based on FortiGate object, blocklist, policy and evidence confirmation.
+- AI Incident Briefing with deterministic fallback when no AI provider is configured.
+
+### Compliance / Risk
+
+Compliance / Risk presents evidence coverage without overstating certification status:
+
+```text
+Playbook | MITRE Technique | NIST CSF 2.0 | LGPD | ISO 27001:2022 | Evidence Source | Status
 ```
 
-O script cria um `spark-soc.tar.gz` temporário, envia para
-`wazuh@192.168.50.20:/tmp/spark-soc.tar.gz`, reinstala `/opt/spark-soc` e
-reinicia o serviço `spark-soc`.
+SPARK generates auditable technical evidence for security controls. This is not automatic certification. Evidence collected must be reviewed by a qualified auditor.
 
-O deploy preserva na VM:
+### Cases & Response
 
-- `/opt/spark-soc/vendor`
-- `/opt/spark-soc/.env`
-- `/opt/spark-soc/config.py`
+Cases & Response manages operational follow-through:
 
-Esses arquivos não são substituídos pelo pacote do Windows. Se a VM ainda não
-tiver `config.py`, o script cria um a partir de `config.example.py`.
+- Case list and lifecycle status.
+- Severity, owner, response history and next action.
+- Evidence and containment linkage.
+- Optional Jira/service request integration when configured.
 
-A FortiGate API key deve ser configurada apenas no `.env` da VM em
-`/opt/spark-soc/.env`. Não coloque o token real no Git, README, `.env.example`
-ou `config.example.py`.
+## Core Integrations
 
-Para contenção via FortiGate, o SPARK usa por padrão:
+| Integration | Purpose |
+| --- | --- |
+| Wazuh Manager | Agent inventory and operational status |
+| Wazuh Indexer | Alert search, candidate detection and dashboards |
+| FortiGate / Fortinet | Network containment, blocklist and policy evidence |
+| Shuffle SOAR | Automation and playbook execution signals |
+| Jira | Optional case/service request handoff |
+| AI Provider | Incident briefing and operational summary |
+
+## FortiGate Containment
+
+SPARK SOC supports real containment using FortiGate API calls.
+
+Block IP:
+
+```bash
+curl -X POST http://192.168.50.20:5000/spark/fortigate/block-ip \
+  -H "Content-Type: application/json" \
+  -d '{"ip":"10.255.255.124","reason":"Analyst containment action","source":"manual","severity":"high"}'
+```
+
+List blocklist:
+
+```bash
+curl http://192.168.50.20:5000/spark/fortigate/blocklist
+```
+
+Unblock IP:
+
+```bash
+curl -X POST http://192.168.50.20:5000/spark/fortigate/unblock-ip \
+  -H "Content-Type: application/json" \
+  -d '{"ip":"10.255.255.124","reason":"Containment cleanup approved by analyst"}'
+```
+
+Default FortiGate containment objects:
 
 ```text
 FORTIGATE_BLOCKLIST_GROUP=SPARK_BLOCKLIST
@@ -118,152 +123,13 @@ FORTIGATE_BLOCK_SRCINTF=any
 FORTIGATE_BLOCK_DSTINTF=any
 ```
 
-Teste manual de bloqueio:
+The FortiGate API key must be configured only in the real runtime environment. Do not commit API keys to Git, README files, examples or logs.
 
-```bash
-curl -X POST http://192.168.50.20:5000/spark/fortigate/block-ip \
-  -H "Content-Type: application/json" \
-  -d '{"ip":"10.255.255.124","reason":"Manual SOC containment validation","source":"manual","severity":"high"}'
-```
+## AI Incident Briefing
 
-Listar bloqueios:
+The Incident Response page can generate an AI Incident Briefing from the current incident or the latest containment action.
 
-```bash
-curl http://192.168.50.20:5000/spark/fortigate/blocklist
-```
-
-Teste manual de desbloqueio:
-
-```bash
-curl -X POST http://192.168.50.20:5000/spark/fortigate/unblock-ip \
-  -H "Content-Type: application/json" \
-  -d '{"ip":"10.255.255.124","reason":"Containment validation cleanup"}'
-```
-
-Se o `sudo` pedir senha, digite a senha do usuário `wazuh`. Se o serviço falhar,
-verifique na VM:
-
-```bash
-sudo systemctl status spark-soc --no-pager
-sudo journalctl -u spark-soc -n 100 --no-pager
-```
-
-## Executive Overview live
-
-A primeira aba consome `/spark/executive-overview`, que agrega:
-
-- Wazuh Indexer: volume de alertas, severidade, timeline e workqueue.
-- Wazuh Manager API: agentes monitorados e status.
-- FortiGate: CPU, memória e sessões via Monitor API.
-- Shuffle: conectividade básica da API e saúde do SOAR.
-
-## Frontend Architecture
-
-O frontend ainda roda sem bundler para preservar compatibilidade com o Flask estatico, mas a base de produto agora fica em `frontend/src`.
-
-```text
-frontend/src/api/          API client centralizado e modulos por dominio
-frontend/src/hooks/        hooks reutilizaveis para live data, acoes e toast
-frontend/src/components/   componentes comuns, incidentes, integracoes e compliance
-frontend/src/styles/       tokens e estilos de componentes novos
-frontend/react/            paginas React atuais montadas pelo shell legado
-```
-
-Camada de API:
-
-- `SparkApi.client`: wrapper unico de `fetch` com JSON, credenciais e erro padrao.
-- `SparkApi.fortigate`: `getStatus`, `blockIp`, `unblockIp`, `getBlocklist`.
-- `SparkApi.incidents`: response telemetry, case creation e case actions.
-- `SparkApi.integrations`: executive overview, network endpoint e status auxiliares.
-- `SparkApi.compliance`: compliance/risk telemetry.
-
-Hooks e componentes:
-
-- `useLiveData(fetcher, options)`: polling, loading inicial, erro e refresh manual.
-- `useAsyncAction(action)`: estado `idle/loading/success/error` para comandos.
-- `useToast()`: feedback global de sucesso/erro.
-- `ActionButton`, `StatusBadge`, `MetricCard`, `ToastProvider`, estados, modal e drawer.
-- `BlockIpModal`, `EvidencePanel`, `ContainmentStatus`, `IntegrationHealthCard`.
-- `ComplianceEvidenceTable`.
-
-## Frontend Migration Plan
-
-Regra de produto: a migracao React nao pode empobrecer o dashboard. O shell legado permanece ativo ate haver paridade visual por pagina.
-
-Inventario visual que deve ser preservado antes de qualquer nova remocao:
-
-- Header/topbar: marca SPARK SOC, status live, relogio BRT, usuario, role e logout.
-- Tabs: navegacao horizontal, estado ativo, spacing compacto e responsividade.
-- Cards/KPIs: bordas, sombra, badges de severidade, estados criticos e grid responsivo.
-- Graficos e visualizacoes: qualquer grafico/timeline/barra existente deve ter equivalente React antes da troca.
-- Tabelas: cabecalho uppercase, hover, mono para IP/timestamps, scroll horizontal e densidade operacional.
-- Incident Response: candidate table, case queue, botoes de acao, Block IP, toast e painel de evidencia.
-- Executive Overview: KPIs, workqueue, health de integracoes, hierarquia visual e cores de status.
-- Network/Endpoint: cards de agentes/FortiGate, tabelas e sinais de conectividade.
-- Compliance/Risk: tabela de evidencia e disclaimer, mantendo acabamento visual sem cards falsos de certificacao.
-
-Migrado nesta etapa segura:
-
-- API calls novas centralizadas em `frontend/src/api`.
-- Hooks e componentes base em `frontend/src`.
-- Incident Response usa `SparkApi.incidents` e `SparkApi.fortigate.blockIp`.
-- Feedback de Block IP usa toast e painel de evidencia com `evidence_id`, object, group e policy.
-- Compliance ganhou tabela inicial de Evidence Coverage e disclaimer de auditoria.
-
-Ainda legado por compatibilidade:
-
-- `frontend/dashboard.html` continua como app shell, topbar, tabbar e fallback HTML.
-- `frontend/js/exec.js` ainda controla autenticacao visual, relogio e troca de tabs.
-- Paginas em `frontend/react/*` ainda sao scripts globais carregados por `<script>`.
-- Executive, Threat, Network e Tickets ainda possuem `fetch` e componentes locais duplicados, a migrar gradualmente.
-
-Arquivos candidatos a remocao na proxima fase:
-
-- `frontend/js/exec.js`, depois que `AppShell`, `Header` e `SidebarOrTabs` assumirem autenticacao, relogio e navegacao.
-- CSS inline de `frontend/dashboard.html`, depois de mover tudo para `frontend/src/styles`.
-- Componentes duplicados dentro de `frontend/react/*`, depois de trocar para `frontend/src/components`.
-
-Ordem correta para eliminar o legado:
-
-1. Migrar Incident Response mantendo paridade visual e print comparativo.
-2. Migrar Executive Overview mantendo graficos/cards/cores/status.
-3. Migrar Network/Endpoint mantendo integracao visual e tabelas.
-4. Migrar Compliance/Risk para modelo de evidencia sem perder acabamento.
-5. So depois mover topbar/tabbar para React.
-6. So depois remover `frontend/js/exec.js`.
-7. So depois transformar `dashboard.html` em shell minimo.
-
-## LEGACY_FRONTEND_DEBT
-
-O legado foi preservado para nao quebrar a demo enquanto a arquitetura React e introduzida. Ele nao deve virar permanente, mas tambem nao deve ser removido antes de paridade visual. Qualquer feature nova deve nascer em `frontend/src` e ser conectada ao shell atual com cuidado. A proxima fase deve migrar uma pagina por vez e comparar visualmente antes de remover navegacao imperativa, CSS inline ou scripts globais.
-
-## Visual Parity Migration Status
-
-As paginas ativas do dashboard agora carregam de `frontend/src/pages`, mantendo os mesmos roots, classes CSS, graficos, cards, tabelas e botoes do visual original:
-
-- Executive Overview: KPIs, posture score SVG, Chart.js alert volume, workqueue expansivel, filtros e service request.
-- Threat Detection: cards de alertas, graficos Chart.js, filtros, facetas, MITRE e tabela de alertas Wazuh.
-- Network / Endpoint: cards FortiGate/Wazuh, topologia SVG, agentes, correlacoes, blocklist e tabelas operacionais.
-- Incident Response: candidates, case queue, timeline, action log, Block IP, Unblock IP, FortiGate blocklist e evidence panel.
-- Compliance / Risk: tabela Evidence Coverage, disclaimer de auditoria, achados Wazuh e sem PCI DSS/porcentagens de certificacao como cards principais.
-- Cases & Response: listagem rica de casos, filtros, formulario, FortiGate block action, escalonamento, Jira e logs de resposta.
-
-O shell `frontend/dashboard.html` e `frontend/js/exec.js` ainda sao ativos por decisao de paridade visual. Eles so devem ser removidos quando um AppShell React reproduzir o mesmo header, tabs, spacing, estados globais e responsividade.
-
-## Product UI Direction
-
-O dashboard comunica o fluxo operacional `Detect -> Decide -> Respond -> Document`. A camada visual adicionada nesta fase preserva os graficos e tabelas existentes, mas reforca o posicionamento de produto MDR:
-
-- Product strip no shell com narrativa NG-SOC/MDR e etapas Detect, Analyze, Respond, Contain, Document.
-- Incident Response com SPARK Trace, Block IP modal, Evidence Pack e Containment Confidence.
-- Block/Unblock continuam usando os endpoints FortiGate reais e atualizam blocklist/action log sem reload completo.
-- AppShell React profissional existe em `frontend/src/components/layout` como alvo da proxima fase, mas ainda nao substitui o shell ativo para evitar perda visual.
-
-`dashboard.html` e `frontend/js/exec.js` continuam ativos porque ainda carregam o header, tabs, relogio e responsividade com paridade visual total. A remocao deve acontecer apenas depois que o AppShell React reproduzir ou melhorar esses elementos.
-
-## AI Provider Configuration
-
-Incident briefing supports provider selection through environment variables. No API key should be committed.
+Supported providers:
 
 ```env
 AI_PROVIDER=none
@@ -274,5 +140,134 @@ GROQ_MODEL=llama-3.1-8b-instant
 DEEPSEEK_API_KEY=
 ```
 
-Supported values for `AI_PROVIDER` are `gemini`, `groq`, `deepseek`, and `none`. When no provider is configured, SPARK keeps the deterministic incident briefing fallback active so the SOC workflow remains available.
-For Groq-backed AI Incident Briefing, set `AI_PROVIDER=groq`, `GROQ_API_KEY` only in the real environment, and optionally `GROQ_MODEL`.
+Use `AI_PROVIDER=groq` and `GROQ_API_KEY` in the real environment to enable Groq-backed briefings. When no provider is configured, SPARK keeps a deterministic fallback active so the response workflow remains available.
+
+The briefing uses operational context such as:
+
+- Incident title, severity, source IP and target asset.
+- MITRE technique and Wazuh evidence when available.
+- FortiGate object, blocklist group and policy.
+- Evidence ID, response action log and containment confidence.
+- Recommended next steps for the analyst.
+
+## Runtime Configuration
+
+SPARK is configured through environment variables and local runtime files. Keep real credentials out of Git.
+
+Recommended production-style variables:
+
+```env
+SPARK_PROFILE=vmware-lab
+WAZUH_BASE=https://192.168.50.20:55000
+WAZUH_MANAGER_IP=192.168.50.20
+WAZUH_AGENT_IP=192.168.50.30
+SHUFFLE_BASE_URL=http://192.168.50.20:3001
+SHUFFLE_BACKEND_URL=http://192.168.50.20:5001
+INDEXER_BASE=https://localhost:9200
+FORTIGATE_BASE_URL=https://192.168.50.40
+FORTIGATE_API_KEY=
+AI_PROVIDER=none
+GROQ_API_KEY=
+```
+
+`config.py` is local runtime configuration and is ignored by Git. Use `config.example.py` as the template when preparing a new environment.
+
+## VMware Deployment
+
+In the current deployment model, the source code is maintained on the Windows workstation and the SPARK backend runs as a systemd service on the Wazuh / Shuffle VM.
+
+Environment:
+
+```text
+Windows browser:      192.168.50.1
+Wazuh + SPARK:        192.168.50.20
+Agent endpoint:       192.168.50.30
+FortiGate:            192.168.50.40
+Dashboard:            http://192.168.50.20:5000
+Shuffle frontend:     http://192.168.50.20:3001
+Shuffle backend/API:  http://192.168.50.20:5001
+Wazuh API:            https://192.168.50.20:55000
+Wazuh Indexer:        https://localhost:9200
+```
+
+Deploy from the project root on Windows:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-vmware.ps1
+```
+
+The deploy script packages the project, sends it to the VM, preserves runtime-only files and restarts the `spark-soc` service.
+
+Preserved on the VM:
+
+- `/opt/spark-soc/.env`
+- `/opt/spark-soc/config.py`
+- `/opt/spark-soc/vendor`
+
+Do not edit application source directly under `/opt/spark-soc`. The Windows repository is the source of truth.
+
+Service diagnostics on the VM:
+
+```bash
+sudo systemctl status spark-soc --no-pager
+sudo journalctl -u spark-soc -n 100 --no-pager
+```
+
+## Local Development
+
+Start Flask locally:
+
+```powershell
+python backend/app.py
+```
+
+When running the backend on Windows and the Wazuh Indexer is only reachable inside the VM, start the local SSH tunnel:
+
+```powershell
+.\scripts\start-indexer-tunnel.ps1
+```
+
+For the local tunnel profile, set:
+
+```env
+INDEXER_BASE=https://localhost:19200
+```
+
+For the VMware runtime profile, set:
+
+```env
+INDEXER_BASE=https://localhost:9200
+```
+
+Stop the tunnel:
+
+```powershell
+.\scripts\stop-indexer-tunnel.ps1
+```
+
+## Frontend Architecture
+
+The console is served by Flask and uses React modules under `frontend/src`.
+
+```text
+frontend/src/api/          Central API client and domain modules
+frontend/src/hooks/        Live data, async action and toast hooks
+frontend/src/components/   Reusable UI, layout, incident, integration and compliance components
+frontend/src/pages/        Dashboard pages
+frontend/src/styles/       Product design tokens and dashboard styles
+```
+
+All new frontend work should use:
+
+- Centralized API calls through `frontend/src/api`.
+- Reusable components for buttons, badges, cards, tables, modals, drawers and status states.
+- Loading, success, error and empty states designed for SOC operations.
+- BRT time display for analyst-facing timestamps.
+
+## Security Notes
+
+- Never commit `.env`, API keys, bearer tokens or private runtime config.
+- Configure FortiGate and AI provider keys only in the real runtime environment.
+- Keep `config.py` local and out of Git.
+- Review `git diff` before every commit when touching configuration or deployment files.
+
