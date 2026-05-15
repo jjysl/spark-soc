@@ -270,7 +270,9 @@ AI_PROVIDER=none
 AI_MODEL=
 GEMINI_API_KEY=
 GROQ_API_KEY=
+GROQ_MODEL=llama-3.1-8b-instant
 DEEPSEEK_API_KEY=
 ```
 
 Supported values for `AI_PROVIDER` are `gemini`, `groq`, `deepseek`, and `none`. When no provider is configured, SPARK keeps the deterministic incident briefing fallback active so the SOC workflow remains available.
+For Groq-backed AI Incident Briefing, set `AI_PROVIDER=groq`, `GROQ_API_KEY` only in the real environment, and optionally `GROQ_MODEL`.

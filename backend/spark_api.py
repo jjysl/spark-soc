@@ -1531,9 +1531,21 @@ def ai_status():
             getattr(config, "GEMINI_API_KEY", ""),
             getattr(config, "GROQ_API_KEY", ""),
             getattr(config, "DEEPSEEK_API_KEY", ""),
-            getattr(config, "AI_MODEL", ""),
+            getattr(config, "GROQ_MODEL", "") or getattr(config, "AI_MODEL", ""),
         )
     )
+
+
+@spark_bp.route("/spark/ai/incident-briefing", methods=["POST"])
+def ai_incident_briefing():
+    body = request.get_json(silent=True) or {}
+    result = ai_proxy.generate_ai_incident_briefing(
+        body,
+        provider=getattr(config, "AI_PROVIDER", "none"),
+        groq_api_key=getattr(config, "GROQ_API_KEY", ""),
+        groq_model=getattr(config, "GROQ_MODEL", "") or getattr(config, "AI_MODEL", "") or "llama-3.1-8b-instant",
+    )
+    return jsonify(result)
 
 
 # ── FortiOS Compatibility Endpoints ───────────────────────────────
