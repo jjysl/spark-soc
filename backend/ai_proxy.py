@@ -23,9 +23,14 @@ If a field is missing, say "not available" or "requires analyst review"; never c
 Rules:
 - Preserve the severity exactly as provided. Do not say P1/P2/P3/P4 unless the input severity is already P1/P2/P3/P4.
 - Always mention source_ip and target when they are provided.
+- If wazuh_rule is provided, executive_summary or severity_rationale must cite that exact rule ID.
+- If alert_count is provided, executive_summary or severity_rationale must cite that exact alert count.
 - Always mention MITRE only when a concrete technique is provided; do not call "requires analyst review" a MITRE classification.
 - Always mention FortiGate object, group, policy, and evidence_id when provided.
+- response_taken must cite FortiGate object, group, and policy when provided.
+- containment_status or response_taken must cite evidence_id when provided.
 - Do not say "0% containment" or "no containment achieved" when FortiGate object, group, policy, evidence_id, containment checks, or containment_confidence exist.
+- If containment_confidence is provided, do not say it is missing or not specified. If it is "4/4", say containment confidence is 4/4 based on FortiGate object, blocklist, policy, and evidence confirmation.
 - Recommended next steps must be specific, operational SOC/MDR actions.
 Return JSON only, with exactly these keys:
 - executive_summary: one short paragraph.
@@ -57,22 +62,59 @@ def _incident_field(payload: dict, key: str, default: str = "") -> str:
     return str(value)[:500]
 
 
-def _fallback_incident_briefing(payload: dict, reason: str = "") -> dict:
+def _normalized_incident_context(payload: dict) -> dict:
     evidence = payload.get("evidence") or {}
     fortigate = evidence.get("fortigate") or evidence
-    title = _incident_field(payload, "title", "Security incident requires analyst review")
-    severity = _incident_field(payload, "severity", "Requires analyst review")
-    source_ip = _incident_field(payload, "source_ip", evidence.get("ip") or "--")
-    target = _incident_field(payload, "target", "monitored asset")
-    mitre = _incident_field(payload, "mitre", evidence.get("mitre") or "")
-    wazuh_rule = payload.get("wazuh_rule") or evidence.get("wazuh_rule") or (payload.get("wazuh_evidence") or {}).get("rule_id") or "--"
-    alert_count = payload.get("alert_count") or evidence.get("alert_count") or (payload.get("wazuh_evidence") or {}).get("alerts_in_range") or "--"
-    confidence = _incident_field(payload, "containment_confidence", evidence.get("containment_confidence") or "requires analyst review")
-    object_name = fortigate.get("object_name") or fortigate.get("fortigate_object") or evidence.get("object_name") or evidence.get("fortigate_object") or "--"
-    group_name = fortigate.get("group_name") or fortigate.get("fortigate_group") or evidence.get("group_name") or evidence.get("fortigate_group") or "--"
-    policy_name = fortigate.get("policy_name") or fortigate.get("fortigate_policy") or evidence.get("policy_name") or evidence.get("fortigate_policy") or "--"
-    evidence_id = payload.get("evidence_id") or evidence.get("evidence_id") or fortigate.get("evidence_id") or "--"
+    wazuh_evidence = payload.get("wazuh_evidence") or evidence.get("wazuh") or {}
     checks = payload.get("containment_checks") or evidence.get("containment_checks") or []
+    return {
+        "incident_id": payload.get("incident_id") or evidence.get("incident_id") or "",
+        "title": _incident_field(payload, "title", evidence.get("title") or "Security incident requires analyst review"),
+        "severity": _incident_field(payload, "severity", evidence.get("severity") or "Requires analyst review"),
+        "source_ip": _incident_field(payload, "source_ip", evidence.get("source_ip") or evidence.get("ip") or "--"),
+        "target": _incident_field(payload, "target", evidence.get("target") or "monitored asset"),
+        "mitre": _incident_field(payload, "mitre", evidence.get("mitre") or ""),
+        "wazuh_rule": payload.get("wazuh_rule") or evidence.get("wazuh_rule") or wazuh_evidence.get("rule_id") or "--",
+        "alert_count": payload.get("alert_count") or evidence.get("alert_count") or wazuh_evidence.get("alerts_in_range") or "--",
+        "wazuh_evidence": wazuh_evidence,
+        "fortigate_object": (
+            payload.get("fortigate_object") or fortigate.get("fortigate_object") or fortigate.get("object_name")
+            or evidence.get("fortigate_object") or evidence.get("object_name") or "--"
+        ),
+        "fortigate_group": (
+            payload.get("fortigate_group") or fortigate.get("fortigate_group") or fortigate.get("group_name")
+            or evidence.get("fortigate_group") or evidence.get("group_name") or "--"
+        ),
+        "fortigate_policy": (
+            payload.get("fortigate_policy") or fortigate.get("fortigate_policy") or fortigate.get("policy_name")
+            or evidence.get("fortigate_policy") or evidence.get("policy_name") or "--"
+        ),
+        "evidence_id": payload.get("evidence_id") or evidence.get("evidence_id") or fortigate.get("evidence_id") or "--",
+        "containment_confidence": (
+            payload.get("containment_confidence") or evidence.get("containment_confidence") or "requires analyst review"
+        ),
+        "containment_checks": checks,
+        "response_action_log": payload.get("response_action_log") or [],
+        "timeline_events": payload.get("timeline_events") or [],
+        "recommended_next_steps": payload.get("recommended_next_steps") or [],
+    }
+
+
+def _fallback_incident_briefing(payload: dict, reason: str = "") -> dict:
+    ctx = _normalized_incident_context(payload)
+    title = ctx["title"]
+    severity = ctx["severity"]
+    source_ip = ctx["source_ip"]
+    target = ctx["target"]
+    mitre = ctx["mitre"]
+    wazuh_rule = ctx["wazuh_rule"]
+    alert_count = ctx["alert_count"]
+    confidence = ctx["containment_confidence"]
+    object_name = ctx["fortigate_object"]
+    group_name = ctx["fortigate_group"]
+    policy_name = ctx["fortigate_policy"]
+    evidence_id = ctx["evidence_id"]
+    checks = ctx["containment_checks"]
     validated_checks = [item for item in checks if isinstance(item, dict) and item.get("ok")]
     check_summary = f"{len(validated_checks)}/{len(checks)} containment checks validated" if checks else "containment checks require analyst review"
     mitre_text = f" MITRE technique: {mitre}." if mitre and "requires analyst review" not in str(mitre).lower() else " MITRE technique is not available."
@@ -120,16 +162,18 @@ def _normalize_briefing(value: dict, fallback: dict) -> dict:
 
 def _enforce_briefing_evidence(briefing: dict, payload: dict) -> dict:
     """Correct common generic AI drift using source evidence without adding secrets."""
-    evidence = payload.get("evidence") or {}
-    severity = str(payload.get("severity") or "").strip()
-    source_ip = str(payload.get("source_ip") or evidence.get("ip") or "").strip()
-    target = str(payload.get("target") or "").strip()
-    mitre = str(payload.get("mitre") or "").strip()
-    object_name = payload.get("fortigate_object") or evidence.get("object_name") or evidence.get("fortigate_object") or ""
-    group_name = payload.get("fortigate_group") or evidence.get("group_name") or evidence.get("fortigate_group") or ""
-    policy_name = payload.get("fortigate_policy") or evidence.get("policy_name") or evidence.get("fortigate_policy") or ""
-    evidence_id = payload.get("evidence_id") or evidence.get("evidence_id") or ""
-    confidence = payload.get("containment_confidence") or evidence.get("containment_confidence") or ""
+    ctx = _normalized_incident_context(payload)
+    severity = str(ctx["severity"] or "").strip()
+    source_ip = str(ctx["source_ip"] or "").strip()
+    target = str(ctx["target"] or "").strip()
+    mitre = str(ctx["mitre"] or "").strip()
+    wazuh_rule = str(ctx["wazuh_rule"] or "").strip()
+    alert_count = str(ctx["alert_count"] or "").strip()
+    object_name = "" if ctx["fortigate_object"] == "--" else ctx["fortigate_object"]
+    group_name = "" if ctx["fortigate_group"] == "--" else ctx["fortigate_group"]
+    policy_name = "" if ctx["fortigate_policy"] == "--" else ctx["fortigate_policy"]
+    evidence_id = "" if ctx["evidence_id"] == "--" else ctx["evidence_id"]
+    confidence = "" if ctx["containment_confidence"] == "requires analyst review" else ctx["containment_confidence"]
     has_containment = any([object_name, group_name, policy_name, evidence_id, confidence])
 
     if severity and not re.fullmatch(r"P[1-4]", severity, re.IGNORECASE):
@@ -143,6 +187,10 @@ def _enforce_briefing_evidence(briefing: dict, payload: dict) -> dict:
         briefing["executive_summary"] = re.sub(r"\bwazuh-server\b", target, briefing.get("executive_summary", ""), flags=re.IGNORECASE)
     if mitre and "requires analyst review" not in mitre.lower() and mitre not in briefing.get("executive_summary", ""):
         briefing["executive_summary"] = f"{briefing.get('executive_summary', '')} MITRE: {mitre}.".strip()
+    if wazuh_rule and wazuh_rule != "--" and wazuh_rule not in briefing.get("severity_rationale", ""):
+        briefing["severity_rationale"] = f"{briefing.get('severity_rationale', '')} Wazuh rule ID: {wazuh_rule}.".strip()
+    if alert_count and alert_count != "--" and alert_count not in briefing.get("severity_rationale", ""):
+        briefing["severity_rationale"] = f"{briefing.get('severity_rationale', '')} Alert count: {alert_count}.".strip()
     if has_containment:
         if re.search(r"no response|no action|not responded", briefing.get("response_taken", ""), re.IGNORECASE):
             briefing["response_taken"] = (
@@ -150,13 +198,17 @@ def _enforce_briefing_evidence(briefing: dict, payload: dict) -> dict:
                 f"group {group_name or 'not available'}, policy {policy_name or 'not available'}, "
                 f"and evidence ID {evidence_id or 'not available'}."
             )
-        bad_status = re.search(r"\b0%\b|no containment|not contained|no block", briefing.get("containment_status", ""), re.IGNORECASE)
+        bad_status = re.search(r"\b0%\b|no containment|not contained|no block|confidence (is )?not specified|not specified", briefing.get("containment_status", ""), re.IGNORECASE)
         if bad_status:
             briefing["containment_status"] = (
                 f"Containment evidence is present: object {object_name or 'not available'}, "
                 f"group {group_name or 'not available'}, policy {policy_name or 'not available'}, "
                 f"evidence ID {evidence_id or 'not available'}, confidence {confidence or 'requires analyst review'}."
             )
+        if confidence and confidence not in briefing.get("containment_status", ""):
+            briefing["containment_status"] = f"{briefing.get('containment_status', '')} Containment confidence is {confidence} based on FortiGate object, blocklist, policy and evidence confirmation.".strip()
+        if evidence_id and evidence_id not in briefing.get("containment_status", "") and evidence_id not in briefing.get("response_taken", ""):
+            briefing["containment_status"] = f"{briefing.get('containment_status', '')} Evidence ID: {evidence_id}.".strip()
     for label, value in (("object", object_name), ("group", group_name), ("policy", policy_name), ("evidence ID", evidence_id)):
         if value and value not in briefing.get("response_taken", ""):
             briefing["response_taken"] = f"{briefing.get('response_taken', '')} FortiGate {label}: {value}.".strip()
@@ -164,29 +216,28 @@ def _enforce_briefing_evidence(briefing: dict, payload: dict) -> dict:
 
 
 def _briefing_prompt(payload: dict) -> str:
-    evidence = payload.get("evidence") or {}
-    wazuh_evidence = payload.get("wazuh_evidence") or evidence.get("wazuh") or {}
+    ctx = _normalized_incident_context(payload)
     compact = {
-        "incident_id": payload.get("incident_id", ""),
-        "title": payload.get("title", ""),
-        "severity": payload.get("severity", ""),
-        "source_ip": payload.get("source_ip", ""),
-        "target": payload.get("target", ""),
-        "mitre": payload.get("mitre", ""),
-        "wazuh_rule": payload.get("wazuh_rule") or evidence.get("wazuh_rule") or wazuh_evidence.get("rule_id") or "",
-        "alert_count": payload.get("alert_count") or evidence.get("alert_count") or wazuh_evidence.get("alerts_in_range") or "",
-        "wazuh_evidence": wazuh_evidence,
+        "incident_id": ctx["incident_id"],
+        "title": ctx["title"],
+        "severity": ctx["severity"],
+        "source_ip": ctx["source_ip"],
+        "target": ctx["target"],
+        "mitre": ctx["mitre"],
+        "wazuh_rule": ctx["wazuh_rule"],
+        "alert_count": ctx["alert_count"],
+        "wazuh_evidence": ctx["wazuh_evidence"],
         "fortigate": {
-            "object": payload.get("fortigate_object") or evidence.get("object_name") or evidence.get("fortigate_object") or "",
-            "group": payload.get("fortigate_group") or evidence.get("group_name") or evidence.get("fortigate_group") or "",
-            "policy": payload.get("fortigate_policy") or evidence.get("policy_name") or evidence.get("fortigate_policy") or "",
-            "evidence_id": payload.get("evidence_id") or evidence.get("evidence_id") or "",
+            "object": ctx["fortigate_object"],
+            "group": ctx["fortigate_group"],
+            "policy": ctx["fortigate_policy"],
+            "evidence_id": ctx["evidence_id"],
         },
-        "containment_confidence": payload.get("containment_confidence", ""),
-        "containment_checks": payload.get("containment_checks") or evidence.get("containment_checks") or [],
-        "response_action_log": payload.get("response_action_log") or [],
-        "timeline_events": payload.get("timeline_events") or [],
-        "recommended_next_steps": payload.get("recommended_next_steps", []),
+        "containment_confidence": ctx["containment_confidence"],
+        "containment_checks": ctx["containment_checks"],
+        "response_action_log": ctx["response_action_log"],
+        "timeline_events": ctx["timeline_events"],
+        "recommended_next_steps": ctx["recommended_next_steps"],
     }
     return json.dumps(compact, ensure_ascii=False)
 
