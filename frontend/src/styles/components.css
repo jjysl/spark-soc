@@ -16,20 +16,3 @@
 .form-input:focus{outline:none;box-shadow:var(--spark-focus);border-color:var(--blue)}
 .containment-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .compliance-disclaimer{font-size:11px;color:var(--t2);border-top:1px solid var(--border);padding:11px 14px;background:#fafbfc}
-.state-card{padding:16px;margin-bottom:14px}
-.state-inline{display:flex;gap:10px;align-items:flex-start}
-.state-title{font-size:13px;font-weight:700;color:var(--t1)}
-.state-detail{font-size:12px;color:var(--tm);margin-top:3px}
-.state-error{border-color:var(--red-b);background:var(--red-l)}
-.health-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
-.integration-card{border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;background:#fafbfc}
-.integration-name{font-size:12px;font-weight:700;color:var(--t1);margin-bottom:5px}
-.integration-detail{font-size:11px;color:var(--tm);margin-top:5px}
-.stack{display:flex;flex-direction:column;gap:8px}
-.list-row{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--border);border-radius:var(--r);padding:10px;background:#fafbfc}
-.row-title{font-size:12px;font-weight:700;color:var(--t1)}
-.muted{color:var(--tm);font-size:11px}
-.user-pill{display:flex;align-items:center;gap:8px;color:var(--t2);font-size:12px}
-.app-shell{min-height:100vh;display:flex;flex-direction:column}
-.page-main{flex:1}
-.page-container{min-width:0}

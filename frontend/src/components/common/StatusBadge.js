@@ -11,17 +11,9 @@
     failed: 'bcrit',
     not_configured: 'binfo',
     critical: 'bp1',
-    p1: 'bp1',
     high: 'bp2',
-    p2: 'bp2',
     medium: 'bp3',
-    p3: 'bp3',
     low: 'bp4',
-    p4: 'bp4',
-    active: 'bok',
-    open: 'bnew',
-    closed: 'bclose',
-    review: 'bmed',
   };
 
   function StatusBadge({status, label}) {

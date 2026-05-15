@@ -1,9 +1,9 @@
 (function () {
   const h = React.createElement;
 
-  function ActionButton({children, loading, disabled, variant, onClick, title, className}) {
+  function ActionButton({children, loading, disabled, variant, onClick, title}) {
     return h('button', {
-      className: className || `btn ${variant === 'primary' ? 'btnp' : ''}`,
+      className: `btn ${variant === 'primary' ? 'btnp' : ''}`,
       disabled: disabled || loading,
       onClick,
       title,
