@@ -30,4 +30,8 @@
 
   window.SparkApi = window.SparkApi || {};
   window.SparkApi.client = {request, get, post, put};
+  window.SparkApi.auth = {
+    me: () => get('/auth/me'),
+    logout: () => request('/auth/logout', {method: 'POST'}),
+  };
 })();

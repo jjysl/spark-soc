@@ -159,14 +159,15 @@ A primeira aba consome `/spark/executive-overview`, que agrega:
 
 ## Frontend Architecture
 
-O frontend ainda roda sem bundler para preservar compatibilidade com o Flask estatico, mas a base de produto agora fica em `frontend/src`.
+O frontend agora usa um shell React unico em `frontend/src`, servido diretamente pelo Flask sem etapa de build. Por compatibilidade com o ambiente atual, os arquivos carregados pelo navegador sao `.js` UMD/IIFE em vez de JSX compilado.
 
 ```text
 frontend/src/api/          API client centralizado e modulos por dominio
 frontend/src/hooks/        hooks reutilizaveis para live data, acoes e toast
 frontend/src/components/   componentes comuns, incidentes, integracoes e compliance
+frontend/src/components/layout/ AppShell, Header, SidebarOrTabs e PageContainer
+frontend/src/pages/        paginas React ativas do dashboard
 frontend/src/styles/       tokens e estilos de componentes novos
-frontend/react/            paginas React atuais montadas pelo shell legado
 ```
 
 Camada de API:
@@ -174,7 +175,7 @@ Camada de API:
 - `SparkApi.client`: wrapper unico de `fetch` com JSON, credenciais e erro padrao.
 - `SparkApi.fortigate`: `getStatus`, `blockIp`, `unblockIp`, `getBlocklist`.
 - `SparkApi.incidents`: response telemetry, case creation e case actions.
-- `SparkApi.integrations`: executive overview, network endpoint e status auxiliares.
+- `SparkApi.integrations`: executive overview, threat detection, network endpoint e status auxiliares.
 - `SparkApi.compliance`: compliance/risk telemetry.
 
 Hooks e componentes:
@@ -182,7 +183,7 @@ Hooks e componentes:
 - `useLiveData(fetcher, options)`: polling, loading inicial, erro e refresh manual.
 - `useAsyncAction(action)`: estado `idle/loading/success/error` para comandos.
 - `useToast()`: feedback global de sucesso/erro.
-- `ActionButton`, `StatusBadge`, `MetricCard`, `ToastProvider`, estados, modal e drawer.
+- `ActionButton`, `StatusBadge`, `MetricCard`, `ToastProvider`, `LoadingState`, `EmptyState`, `ErrorState`, modal e drawer.
 - `BlockIpModal`, `EvidencePanel`, `ContainmentStatus`, `IntegrationHealthCard`.
 - `ComplianceEvidenceTable`.
 
@@ -190,34 +191,31 @@ Hooks e componentes:
 
 Migrado nesta etapa:
 
-- API calls novas centralizadas em `frontend/src/api`.
-- Hooks e componentes base em `frontend/src`.
-- Incident Response usa `SparkApi.incidents` e `SparkApi.fortigate.blockIp`.
-- Feedback de Block IP usa toast e painel de evidencia com `evidence_id`, object, group e policy.
-- Compliance ganhou tabela inicial de Evidence Coverage e disclaimer de auditoria.
+- `frontend/dashboard.html` virou shell minimo com `#root` e scripts do app React.
+- `frontend/src/App.js` monta o dashboard inteiro em um unico root React.
+- `AppShell`, `Header`, `SidebarOrTabs` e `PageContainer` substituem topbar, tabbar, relogio e navegacao antigos.
+- Paginas ativas foram movidas para `frontend/src/pages`.
+- API calls das paginas ativas passam por `frontend/src/api`.
+- Incident Response usa `/spark/fortigate/block-ip`, `/spark/fortigate/unblock-ip` e `/spark/fortigate/blocklist`.
+- Compliance/Risk usa tabela de Evidence Coverage e disclaimer de auditoria.
 
-Ainda legado por compatibilidade:
+Legado mantido apenas como codigo nao ativo:
 
-- `frontend/dashboard.html` continua como app shell, topbar, tabbar e fallback HTML.
-- `frontend/js/exec.js` ainda controla autenticacao visual, relogio e troca de tabs.
-- Paginas em `frontend/react/*` ainda sao scripts globais carregados por `<script>`.
-- Executive, Threat, Network e Tickets ainda possuem `fetch` e componentes locais duplicados, a migrar gradualmente.
+- `frontend/react/*` permanece no repositorio como referencia temporaria, mas nao e carregado por `dashboard.html`.
 
-Arquivos candidatos a remocao na proxima fase:
+Removido nesta etapa:
 
-- `frontend/js/exec.js`, depois que `AppShell`, `Header` e `SidebarOrTabs` assumirem autenticacao, relogio e navegacao.
-- CSS inline de `frontend/dashboard.html`, depois de mover tudo para `frontend/src/styles`.
-- Componentes duplicados dentro de `frontend/react/*`, depois de trocar para `frontend/src/components`.
+- `frontend/js/exec.js`.
+- CSS inline gigante de `frontend/dashboard.html`; os estilos foram movidos para `frontend/src/styles/dashboard.css`.
+- Scripts ativos de `frontend/react/*` no shell do dashboard.
 
-Ordem recomendada para eliminar o legado:
+Ordem recomendada para eliminar o legado restante:
 
-1. Criar `frontend/src/layout/AppShell.js`, `Header.js` e `SidebarOrTabs.js`.
-2. Montar um unico root React no dashboard e mover tabs para estado React.
-3. Migrar Executive/Network/Threat/Tickets para `SparkApi` e componentes comuns.
-4. Extrair todo CSS inline restante para `frontend/src/styles`.
-5. Remover `frontend/js/exec.js`.
-6. Transformar `dashboard.html` em shell minimo com apenas root e script do app.
+1. Comparar `frontend/react/*` com `frontend/src/pages` e mover qualquer detalhe visual ainda util.
+2. Remover fisicamente `frontend/react/*` quando a demo validar paridade suficiente.
+3. Reduzir classes CSS herdadas de `dashboard.css` que nao forem usadas pelo novo shell.
+4. Introduzir build tool apenas se o projeto decidir usar JSX real, TypeScript ou bundling.
 
 ## LEGACY_FRONTEND_DEBT
 
-O legado foi preservado para nao quebrar a demo enquanto a arquitetura React e introduzida. Ele nao deve virar permanente. Qualquer feature nova deve nascer em `frontend/src` e so ser conectada as paginas antigas quando necessario. A proxima fase deve remover a navegacao imperativa por `onclick`, reduzir CSS inline e substituir os scripts globais por um app React unico.
+O dashboard ativo nao depende mais de `frontend/js/exec.js`, `frontend/react/*` ou do layout antigo embutido em `dashboard.html`. A divida restante e manter os arquivos `frontend/react/*` como referencia temporaria e limpar classes CSS herdadas que foram migradas para `frontend/src/styles/dashboard.css`. Qualquer feature nova deve nascer em `frontend/src`.
