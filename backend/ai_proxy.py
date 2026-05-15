@@ -27,16 +27,23 @@ Rules:
 - If alert_count is provided, executive_summary or severity_rationale must cite that exact alert count.
 - Always mention MITRE only when a concrete technique is provided; do not call "requires analyst review" a MITRE classification.
 - Always mention FortiGate object, group, policy, and evidence_id when provided.
-- response_taken must cite FortiGate object, group, and policy when provided.
-- containment_status or response_taken must cite evidence_id when provided.
+- analysis must cite FortiGate object, group, and policy when provided.
+- analysis must cite evidence_id when provided.
 - Do not say "0% containment" or "no containment achieved" when FortiGate object, group, policy, evidence_id, containment checks, or containment_confidence exist.
 - If containment_confidence is provided, do not say it is missing or not specified. If it is "4/4", say containment confidence is 4/4 based on FortiGate object, blocklist, policy, and evidence confirmation.
 - Recommended next steps must be specific, operational SOC/MDR actions.
 Return JSON only, with exactly these keys:
-- executive_summary: one short paragraph.
-- severity_rationale: one short paragraph.
-- response_taken: one short paragraph.
-- containment_status: one short paragraph.
+- incident: incident title or "not available".
+- severity: exact severity from input or "requires analyst review".
+- mitre_attack: concrete MITRE ATT&CK technique or "not available".
+- source_ip: source IP or "not available".
+- target: target asset or "not available".
+- wazuh_rule: Wazuh rule ID or "not available".
+- alert_count: alert count or "not available".
+- fortigate_object: FortiGate address object or "not available".
+- fortigate_policy: FortiGate policy or "not available".
+- evidence_id: evidence ID or "not available".
+- analysis: one concise paragraph covering detection, response and containment confidence.
 - recommended_next_steps: array of 3 to 5 short action strings.
 No markdown."""
 
@@ -119,23 +126,25 @@ def _fallback_incident_briefing(payload: dict, reason: str = "") -> dict:
     check_summary = f"{len(validated_checks)}/{len(checks)} containment checks validated" if checks else "containment checks require analyst review"
     mitre_text = f" MITRE technique: {mitre}." if mitre and "requires analyst review" not in str(mitre).lower() else " MITRE technique is not available."
     suffix = f" Fallback reason: {reason}" if reason else ""
+    analysis = (
+        f"{title} is prioritized as {severity}. Source {source_ip} targeted {target}; "
+        f"Wazuh rule {wazuh_rule} produced {alert_count} alert(s).{mitre_text} "
+        f"FortiGate evidence references object {object_name}, group {group_name}, policy {policy_name}, "
+        f"evidence ID {evidence_id}, and containment confidence {confidence}; {check_summary}."
+        f"{suffix}"
+    )
     return {
-        "executive_summary": (
-            f"{title} is prioritized as {severity}. Source {source_ip} targeted {target}; "
-            f"Wazuh rule {wazuh_rule} produced {alert_count} alert(s).{mitre_text}{suffix}"
-        ),
-        "severity_rationale": (
-            f"Severity remains {severity} as received from SPARK/Wazuh context. "
-            f"Rule {wazuh_rule}, alert volume {alert_count}, source {source_ip}, and target {target} should guide analyst review."
-        ),
-        "response_taken": (
-            f"FortiGate response evidence references object {object_name}, group {group_name}, "
-            f"policy {policy_name}, and evidence ID {evidence_id}."
-        ),
-        "containment_status": (
-            f"Containment confidence is {confidence}; {check_summary}. "
-            "Traffic-path validation and correlated alert review remain analyst-controlled checks."
-        ),
+        "incident": title or "not available",
+        "severity": severity or "requires analyst review",
+        "mitre_attack": mitre if mitre and "requires analyst review" not in str(mitre).lower() else "not available",
+        "source_ip": source_ip if source_ip != "--" else "not available",
+        "target": target or "not available",
+        "wazuh_rule": wazuh_rule if wazuh_rule != "--" else "not available",
+        "alert_count": alert_count if alert_count != "--" else "not available",
+        "fortigate_object": object_name if object_name != "--" else "not available",
+        "fortigate_policy": policy_name if policy_name != "--" else "not available",
+        "evidence_id": evidence_id if evidence_id != "--" else "not available",
+        "analysis": analysis,
         "recommended_next_steps": [
             f"Validate whether source {source_ip} is blocked by {policy_name} through {group_name}.",
             f"Review Wazuh rule {wazuh_rule} and correlated alerts for target {target}.",
@@ -152,10 +161,22 @@ def _normalize_briefing(value: dict, fallback: dict) -> dict:
     if not isinstance(steps, list):
         steps = fallback["recommended_next_steps"]
     return {
-        "executive_summary": str(value.get("executive_summary") or fallback["executive_summary"])[:1200],
-        "severity_rationale": str(value.get("severity_rationale") or fallback["severity_rationale"])[:1200],
-        "response_taken": str(value.get("response_taken") or fallback["response_taken"])[:1200],
-        "containment_status": str(value.get("containment_status") or fallback["containment_status"])[:1200],
+        "incident": str(value.get("incident") or value.get("title") or fallback["incident"])[:500],
+        "severity": str(value.get("severity") or fallback["severity"])[:120],
+        "mitre_attack": str(value.get("mitre_attack") or value.get("mitre") or fallback["mitre_attack"])[:240],
+        "source_ip": str(value.get("source_ip") or fallback["source_ip"])[:120],
+        "target": str(value.get("target") or fallback["target"])[:240],
+        "wazuh_rule": str(value.get("wazuh_rule") or fallback["wazuh_rule"])[:120],
+        "alert_count": str(value.get("alert_count") or fallback["alert_count"])[:120],
+        "fortigate_object": str(value.get("fortigate_object") or fallback["fortigate_object"])[:240],
+        "fortigate_policy": str(value.get("fortigate_policy") or fallback["fortigate_policy"])[:240],
+        "evidence_id": str(value.get("evidence_id") or fallback["evidence_id"])[:240],
+        "analysis": str(
+            value.get("analysis")
+            or value.get("executive_summary")
+            or value.get("severity_rationale")
+            or fallback["analysis"]
+        )[:1600],
         "recommended_next_steps": [str(item)[:240] for item in steps[:5]],
     }
 
@@ -176,42 +197,46 @@ def _enforce_briefing_evidence(briefing: dict, payload: dict) -> dict:
     confidence = "" if ctx["containment_confidence"] == "requires analyst review" else ctx["containment_confidence"]
     has_containment = any([object_name, group_name, policy_name, evidence_id, confidence])
 
+    briefing["incident"] = ctx["title"] or briefing.get("incident") or "not available"
+    briefing["severity"] = severity or briefing.get("severity") or "requires analyst review"
+    briefing["mitre_attack"] = mitre if mitre and "requires analyst review" not in mitre.lower() else "not available"
+    briefing["source_ip"] = source_ip if source_ip and source_ip != "--" else "not available"
+    briefing["target"] = target if target and target != "--" else "not available"
+    briefing["wazuh_rule"] = wazuh_rule if wazuh_rule and wazuh_rule != "--" else "not available"
+    briefing["alert_count"] = alert_count if alert_count and alert_count != "--" else "not available"
+    briefing["fortigate_object"] = object_name or "not available"
+    briefing["fortigate_policy"] = policy_name or "not available"
+    briefing["evidence_id"] = evidence_id or "not available"
+
     if severity and not re.fullmatch(r"P[1-4]", severity, re.IGNORECASE):
-        for key in ("executive_summary", "severity_rationale"):
-            briefing[key] = re.sub(r"\bP[1-4]\b", severity, briefing.get(key, ""), flags=re.IGNORECASE)
-    if source_ip and source_ip not in briefing.get("executive_summary", ""):
-        briefing["executive_summary"] = f"{briefing.get('executive_summary', '')} Source IP: {source_ip}.".strip()
-    if target and target not in briefing.get("executive_summary", ""):
-        briefing["executive_summary"] = f"{briefing.get('executive_summary', '')} Target: {target}.".strip()
+        briefing["analysis"] = re.sub(r"\bP[1-4]\b", severity, briefing.get("analysis", ""), flags=re.IGNORECASE)
+    if source_ip and source_ip not in briefing.get("analysis", ""):
+        briefing["analysis"] = f"{briefing.get('analysis', '')} Source IP: {source_ip}.".strip()
+    if target and target not in briefing.get("analysis", ""):
+        briefing["analysis"] = f"{briefing.get('analysis', '')} Target: {target}.".strip()
     if target:
-        briefing["executive_summary"] = re.sub(r"\bwazuh-server\b", target, briefing.get("executive_summary", ""), flags=re.IGNORECASE)
-    if mitre and "requires analyst review" not in mitre.lower() and mitre not in briefing.get("executive_summary", ""):
-        briefing["executive_summary"] = f"{briefing.get('executive_summary', '')} MITRE: {mitre}.".strip()
-    if wazuh_rule and wazuh_rule != "--" and wazuh_rule not in briefing.get("severity_rationale", ""):
-        briefing["severity_rationale"] = f"{briefing.get('severity_rationale', '')} Wazuh rule ID: {wazuh_rule}.".strip()
-    if alert_count and alert_count != "--" and alert_count not in briefing.get("severity_rationale", ""):
-        briefing["severity_rationale"] = f"{briefing.get('severity_rationale', '')} Alert count: {alert_count}.".strip()
+        briefing["analysis"] = re.sub(r"\bwazuh-server\b", target, briefing.get("analysis", ""), flags=re.IGNORECASE)
+    if mitre and "requires analyst review" not in mitre.lower() and mitre not in briefing.get("analysis", ""):
+        briefing["analysis"] = f"{briefing.get('analysis', '')} MITRE: {mitre}.".strip()
+    if wazuh_rule and wazuh_rule != "--" and wazuh_rule not in briefing.get("analysis", ""):
+        briefing["analysis"] = f"{briefing.get('analysis', '')} Wazuh rule ID: {wazuh_rule}.".strip()
+    if alert_count and alert_count != "--" and alert_count not in briefing.get("analysis", ""):
+        briefing["analysis"] = f"{briefing.get('analysis', '')} Alert count: {alert_count}.".strip()
     if has_containment:
-        if re.search(r"no response|no action|not responded", briefing.get("response_taken", ""), re.IGNORECASE):
-            briefing["response_taken"] = (
-                f"FortiGate response evidence references object {object_name or 'not available'}, "
-                f"group {group_name or 'not available'}, policy {policy_name or 'not available'}, "
-                f"and evidence ID {evidence_id or 'not available'}."
-            )
-        bad_status = re.search(r"\b0%\b|no containment|not contained|no block|confidence (is )?not specified|not specified", briefing.get("containment_status", ""), re.IGNORECASE)
+        bad_status = re.search(r"\b0%\b|no containment|not contained|no block|confidence (is )?not specified|not specified", briefing.get("analysis", ""), re.IGNORECASE)
         if bad_status:
-            briefing["containment_status"] = (
+            briefing["analysis"] = (
                 f"Containment evidence is present: object {object_name or 'not available'}, "
                 f"group {group_name or 'not available'}, policy {policy_name or 'not available'}, "
                 f"evidence ID {evidence_id or 'not available'}, confidence {confidence or 'requires analyst review'}."
             )
-        if confidence and confidence not in briefing.get("containment_status", ""):
-            briefing["containment_status"] = f"{briefing.get('containment_status', '')} Containment confidence is {confidence} based on FortiGate object, blocklist, policy and evidence confirmation.".strip()
-        if evidence_id and evidence_id not in briefing.get("containment_status", "") and evidence_id not in briefing.get("response_taken", ""):
-            briefing["containment_status"] = f"{briefing.get('containment_status', '')} Evidence ID: {evidence_id}.".strip()
+        if confidence and confidence not in briefing.get("analysis", ""):
+            briefing["analysis"] = f"{briefing.get('analysis', '')} Containment confidence is {confidence} based on FortiGate object, blocklist, policy and evidence confirmation.".strip()
+        if evidence_id and evidence_id not in briefing.get("analysis", ""):
+            briefing["analysis"] = f"{briefing.get('analysis', '')} Evidence ID: {evidence_id}.".strip()
     for label, value in (("object", object_name), ("group", group_name), ("policy", policy_name), ("evidence ID", evidence_id)):
-        if value and value not in briefing.get("response_taken", ""):
-            briefing["response_taken"] = f"{briefing.get('response_taken', '')} FortiGate {label}: {value}.".strip()
+        if value and value not in briefing.get("analysis", ""):
+            briefing["analysis"] = f"{briefing.get('analysis', '')} FortiGate {label}: {value}.".strip()
     return briefing
 
 
@@ -266,8 +291,8 @@ def generate_ai_incident_briefing(
             "provider": "groq",
             "model": model,
             "source": "fallback",
-            "briefing": _fallback_incident_briefing(incident_payload, "Groq API key is not configured."),
-            "fallback_reason": "GROQ_API_KEY is not configured.",
+            "briefing": _fallback_incident_briefing(incident_payload, "AI connector credential is not configured."),
+            "fallback_reason": "ai_connector_not_configured",
         }
 
     try:

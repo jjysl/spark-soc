@@ -14,5 +14,9 @@
 .form-stack{display:flex;flex-direction:column;gap:8px}.form-stack label{font-size:10px;font-weight:700;text-transform:uppercase;color:var(--tm);letter-spacing:.07em}
 .form-input{font-family:'Inter',sans-serif;border:1px solid var(--border-s);border-radius:6px;padding:8px 10px;color:var(--t1);background:#fff}
 .form-input:focus{outline:none;box-shadow:var(--spark-focus);border-color:var(--blue)}
+.btn-danger{background:var(--red)!important;border-color:var(--red)!important;color:#fff!important}
+.btn-danger:disabled{opacity:.55;cursor:not-allowed}
+.containment-target{font-size:18px;font-weight:900;color:var(--red);background:#fff5f5}
+.form-warning{font-size:11px;color:var(--red);font-weight:700}
 .containment-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .compliance-disclaimer{font-size:11px;color:var(--t2);border-top:1px solid var(--border);padding:11px 14px;background:#fafbfc}

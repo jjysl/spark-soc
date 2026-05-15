@@ -305,6 +305,8 @@
     const [lastEvidence, setLastEvidence] = useState(null);
     const [blocklist, setBlocklist] = useState([]);
     const [blockTarget, setBlockTarget] = useState(null);
+    const [unblockTarget, setUnblockTarget] = useState(null);
+    const [unblockReason, setUnblockReason] = useState('');
     const [aiBriefing, setAiBriefing] = useState(null);
     const [aiBriefingLoading, setAiBriefingLoading] = useState(false);
     const [aiProvider, setAiProvider] = useState({provider: 'none', mode: 'deterministic_fallback'});
@@ -415,8 +417,8 @@
         setBlockTarget(null);
         toast.pushToast({
           tone: 'success',
-          title: 'FortiGate block applied',
-          message: `${payload.ip} -> ${payload.object_name || 'SPARK_BLOCK object'} | evidence ${payload.evidence_id || '--'}`,
+          title: 'Block confirmed via FortiGate',
+          message: `${payload.object_name || 'SPARK_BLOCK object'} | ${payload.group_name || 'SPARK_BLOCKLIST'} | ${payload.policy_name || 'SPARK_AUTO_BLOCK'} | evidence ${payload.evidence_id || '--'}`,
         });
         await load();
       } catch (err) {
@@ -517,17 +519,29 @@
       );
     }
 
-    async function unblockIp(item) {
+    function openUnblockModal(item) {
+      if (!item?.ip) return;
+      setUnblockReason('');
+      setUnblockTarget(item);
+    }
+
+    async function unblockIp() {
+      const item = unblockTarget;
       const ip = item?.ip;
       if (!ip) return;
+      if (unblockReason.trim().length < 10) {
+        toast.pushToast({tone: 'warn', title: 'Unblock justification required', message: 'Enter at least 10 characters before removing containment.'});
+        return;
+      }
       setActionState(`unblock:${ip}`);
       try {
         const payload = await api.fortigate.unblockIp({
           ip,
-          reason: 'Analyst unblock from Incident Response',
+          reason: unblockReason.trim(),
           incident_id: item.incident_id || '',
         });
         setLastEvidence(payload);
+        setUnblockTarget(null);
         toast.pushToast({
           tone: 'success',
           title: 'FortiGate unblock applied',
@@ -563,7 +577,7 @@
               className: 'btn',
               loading: actionState === `unblock:${row.ip}`,
               disabled: actionState === `unblock:${row.ip}`,
-              onClick: () => unblockIp(row),
+              onClick: () => openUnblockModal(row),
             }, 'Unblock'))
           )))
         ) : h(EmptyState, {
@@ -742,10 +756,17 @@
     function briefingSectionsFromPayload(briefing) {
       const value = briefing || {};
       return [
-        ['Executive Summary', value.executive_summary || 'Incident summary requires analyst review.'],
-        ['Severity Rationale', value.severity_rationale || 'Severity rationale requires analyst review.'],
-        ['Response Taken', value.response_taken || 'No response evidence recorded yet.'],
-        ['Containment Status', value.containment_status || 'Containment status requires analyst review.'],
+        ['Incident', value.incident || value.title || value.executive_summary || 'Incident requires analyst review.'],
+        ['Severity', value.severity || 'Requires analyst review'],
+        ['MITRE ATT&CK', value.mitre_attack || value.mitre || 'not available'],
+        ['Source IP', value.source_ip || 'not available'],
+        ['Target', value.target || 'not available'],
+        ['Wazuh Rule', value.wazuh_rule || 'not available'],
+        ['Alert Count', value.alert_count || 'not available'],
+        ['FortiGate Object', value.fortigate_object || 'not available'],
+        ['FortiGate Policy', value.fortigate_policy || 'not available'],
+        ['Evidence ID', value.evidence_id || 'not available'],
+        ['Analysis', value.analysis || value.containment_status || value.response_taken || 'Analysis requires analyst review.'],
         ['Recommended Next Steps', Array.isArray(value.recommended_next_steps) ? value.recommended_next_steps.join(' ') : 'Review correlated alerts, validate containment and attach evidence to the case.'],
       ];
     }
@@ -764,14 +785,19 @@
         model: aiProvider.model || 'provider-default',
         source: 'fallback',
         briefing: {
-          executive_summary: `${caseTitle(incident)} is prioritized as ${incident.priority || incident.severity || 'analyst review'} with source ${caseIp(incident) || evidence.ip || '--'} and target ${caseTarget(incident)}.`,
-          severity_rationale: rule !== '--'
-            ? `${incident.priority || incident.severity || 'Requires analyst review'} based on Wazuh rule ${rule}${alerts !== '' ? `, ${fmtNum(alerts)} alert(s),` : ''} and current incident context.`
-            : `${incident.priority || incident.severity || 'Requires analyst review'} based on current incident context and analyst evidence.`,
-          response_taken: selected.hasContainment
-            ? `FortiGate object ${containmentObjectName(evidence) || '--'}, group ${containmentGroupName(evidence) || 'SPARK_BLOCKLIST'}, policy ${containmentPolicyName(evidence) || 'SPARK_AUTO_BLOCK'}, evidence ${evidence.evidence_id || '--'}.`
-            : 'No containment action has been executed for this incident yet.',
-          containment_status: containmentPhrase,
+          incident: caseTitle(incident),
+          severity: incident.priority || incident.severity || 'Requires analyst review',
+          mitre_attack: caseMitre(incident) || 'not available',
+          source_ip: caseIp(incident) || evidence.ip || 'not available',
+          target: caseTarget(incident),
+          wazuh_rule: rule !== '--' ? rule : 'not available',
+          alert_count: alerts !== '' ? fmtNum(alerts) : 'not available',
+          fortigate_object: containmentObjectName(evidence) || 'not available',
+          fortigate_policy: containmentPolicyName(evidence) || 'not available',
+          evidence_id: evidence.evidence_id || 'not available',
+          analysis: selected.hasContainment
+            ? `${caseTitle(incident)} is prioritized as ${incident.priority || incident.severity || 'analyst review'}. FortiGate object ${containmentObjectName(evidence) || '--'} is associated with ${containmentGroupName(evidence) || 'SPARK_BLOCKLIST'} and policy ${containmentPolicyName(evidence) || 'SPARK_AUTO_BLOCK'}. ${containmentPhrase}`
+            : `${caseTitle(incident)} requires analyst review. No containment action has been executed for this incident yet. Containment has not been verified yet.`,
           recommended_next_steps: selected.hasContainment
             ? ['Validate traffic-path enforcement.', rule !== '--' ? `Review Wazuh rule ${rule} and correlated alerts.` : 'Review correlated alerts.', 'Attach Evidence Pack to the case.', 'Assign case owner.']
             : ['Review correlated alerts.', 'Decide whether containment is required.', 'Configure or validate the FortiGate connector for this workspace.', 'Attach analyst notes to the case.'],
@@ -783,9 +809,10 @@
       return [
         'AI Incident Briefing',
         `Source: ${result.source || 'fallback'} | Provider: ${result.provider || 'none'} | Model: ${result.model || 'provider-default'}`,
+        result.source === 'fallback' ? 'MODO DETERMINÍSTICO - IA indisponível' : '',
         '',
         ...sections.map(([title, body]) => `${title}: ${body}`),
-      ].join('\n');
+      ].filter(Boolean).join('\n');
     }
 
     async function generateAiBriefing(forceLatestContainment) {
@@ -880,6 +907,32 @@
 
     const latestContainmentForUi = latestContainmentEvidence(false);
 
+    function UnblockConfirmModal({open, target, reason, loading, onReasonChange, onClose, onConfirm}) {
+      const Modal = components.Modal;
+      if (!Modal) return null;
+      const validReason = reason.trim().length >= 10;
+      return h(Modal, {
+        open,
+        title: 'Confirm FortiGate Unblock',
+        onClose,
+        footer: h('div', {className: 'row-actions'},
+          h('button', {className: 'btn', onClick: onClose, disabled: loading}, 'Cancel'),
+          h('button', {className: 'btn btn-danger', onClick: onConfirm, disabled: loading || !validReason}, loading ? 'Unblocking...' : 'Confirm Unblock')
+        ),
+      },
+        h('div', {className: 'form-stack'},
+          h('label', null, 'IP address'),
+          h('input', {className: 'form-input mono containment-target', readOnly: true, value: target?.ip || ''}),
+          h('label', null, 'FortiGate object'),
+          h('input', {className: 'form-input mono', readOnly: true, value: target?.object_name || target?.fortigate_object || 'not available'}),
+          h('label', null, 'Unblock justification'),
+          h('textarea', {className: 'form-input', rows: 4, value: reason, onChange: event => onReasonChange(event.target.value), placeholder: 'Describe why containment can be removed'}),
+          h('div', {className: validReason ? 'empty-detail' : 'form-warning'}, validReason ? 'Justification accepted for audit evidence.' : 'Enter at least 10 characters to confirm unblock.'),
+          h('div', {className: 'empty-detail'}, 'The object will be removed from SPARK_BLOCKLIST and an unblock evidence record will be stored.')
+        )
+      );
+    }
+
     function AiBriefingCard({briefing}) {
       if (!briefing) return null;
       return h('div', {className: 'card ai-briefing-card'},
@@ -888,7 +941,10 @@
             h('div', {className: 'ct'}, 'AI Incident Briefing'),
             h('div', {className: 'cs'}, `Generated ${briefing.generatedAt.toLocaleTimeString('pt-BR', {hour12: false, timeZone: 'America/Sao_Paulo'})} BRT · ${briefing.source === 'ai-live' ? `${briefing.provider} live` : 'deterministic fallback'} · ${briefing.model || 'provider-default'}`)
           ),
-          h('button', {className: 'btn', onClick: copyAiBriefing}, 'Copy Briefing')
+          h('div', {className: 'row-actions'},
+            briefing.source === 'fallback' ? h('span', {className: 'badge bwarn'}, 'MODO DETERMINÍSTICO - IA indisponível') : h('span', {className: 'badge blive'}, 'AI live'),
+            h('button', {className: 'btn', onClick: copyAiBriefing}, 'Copy Briefing')
+          )
         ),
         h('div', {className: 'cb briefing-grid'},
           briefing.sections.map(([title, body]) => h('div', {className: 'briefing-item', key: title},
@@ -928,7 +984,7 @@
         h(SourceChip, {label: 'Wazuh Indexer', ok: wazuhOk}),
         h(SourceChip, {label: 'Shuffle', ok: shuffleOk})
       ),
-      h(components.LoadingState && loading && !data ? components.LoadingState : React.Fragment, loading && !data ? {title: 'Loading response telemetry', detail: 'Collecting candidates, cases, and action evidence.'} : null),
+      h(components.LoadingState && loading && !data ? components.LoadingState : React.Fragment, loading && !data ? {title: 'Consulting Wazuh Indexer...', detail: 'Collecting incident candidates, cases and response evidence for this workspace.'} : null),
       h('div', {className: 'g11'},
         h(EvidencePack, {evidence: lastEvidence, payload, candidate: briefingCandidate, onCopy: copyEvidencePack}),
         h(ContainmentConfidence, {evidence: lastEvidence})
@@ -956,6 +1012,15 @@
         onClose: () => setBlockTarget(null),
         onSubmit: submitBlockIp,
       }) : null,
+      h(UnblockConfirmModal, {
+        open: Boolean(unblockTarget),
+        target: unblockTarget,
+        reason: unblockReason,
+        loading: actionState.startsWith('unblock:'),
+        onReasonChange: setUnblockReason,
+        onClose: () => setUnblockTarget(null),
+        onConfirm: unblockIp,
+      }),
       h('div', {className: 'g11', style: {marginTop: 14}},
         h(TimelineCard, {events: payload.timeline}),
         h(ActionLogCard, {actions: payload.actions})

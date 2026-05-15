@@ -80,7 +80,7 @@
       ),
       h('div', {className: 'aibox loading'},
         h('strong', null, 'SPARK Live Triage: '),
-        error ? `Executive telemetry unavailable in this environment. ${error}` : 'Collecting live telemetry. The view will populate when the first snapshot is ready.'
+        error ? 'Executive telemetry unavailable in this workspace. Keeping the console ready for the next source check.' : 'Consulting Wazuh Indexer, FortiGate and SOAR telemetry. The view will populate when the first snapshot is ready.'
       ),
       h('div', {className: 'source-strip'},
         h(SourceBadge, {label: 'Wazuh', loading: true}),
@@ -336,7 +336,7 @@
             ) : null
           );
         })
-      ) : h('div', {className: 'cb', style: {color: 'var(--tm)', textAlign: 'center'}}, 'No alerts match the selected filters'),
+      ) : h('div', {className: 'cb', style: {color: 'var(--tm)', textAlign: 'center'}}, 'No active incidents match the selected filters. Awaiting telemetry from this workspace.'),
       h('div', {style: {display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderTop: '1px solid var(--border)'}},
         h('div', {style: {display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--tm)'}},
           h('span', null, 'Rows per page:'),
@@ -352,6 +352,107 @@
           h('button', {className: 'btn', disabled: currentPage <= 1, onClick: () => setPage(value => Math.max(1, value - 1))}, 'Prev'),
           h('button', {className: 'btn', disabled: currentPage >= totalPages, onClick: () => setPage(value => Math.min(totalPages, value + 1))}, 'Next')
         )
+      )
+    );
+  }
+
+  function priorityRank(priority) {
+    return {P1: 1, P2: 2, P3: 3, P4: 4}[String(priority || '').toUpperCase()] || 9;
+  }
+
+  function elapsedSince(value) {
+    if (!value) return 'not available';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return 'not available';
+    const minutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000));
+    if (minutes < 60) return `${minutes} min`;
+    const hours = Math.floor(minutes / 60);
+    const remainder = minutes % 60;
+    return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+  }
+
+  function respondToIncident() {
+    const buttons = Array.from(document.querySelectorAll('.tbtn'));
+    const target = buttons.find(button => button.textContent.includes('Incident Response'));
+    if (target) target.click();
+  }
+
+  function normalizeQueueStatus(status) {
+    const value = String(status || '').toLowerCase();
+    if (value.includes('contain') || value.includes('closed') || value.includes('resolved')) return 'Contained';
+    if (value.includes('investig') || value.includes('assigned') || value.includes('progress')) return 'Investigating';
+    return 'New';
+  }
+
+  function ShiftSummary({data, workqueue}) {
+    const kpis = data?.kpis || {};
+    const lifecycle = data?.case_lifecycle || {};
+    const active = kpis.active_incidents ?? workqueue.length ?? 0;
+    const contained = lifecycle.contained ?? lifecycle.closed ?? lifecycle.resolved ?? 0;
+    const mttr = kpis.mttr || 'Awaiting evidence';
+    return h('div', {className: 'shift-summary'},
+      h('span', null, 'Shift 08:00-16:00'),
+      h('span', null, `${fmtNum(active)} active incidents`),
+      h('span', null, `${fmtNum(contained)} contained`),
+      h('span', null, `MTTR: ${mttr}`),
+      h('span', null, 'Workspace: Production')
+    );
+  }
+
+  function IncidentPriorityQueue({items}) {
+    const rows = [...(Array.isArray(items) ? items : [])]
+      .sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority) || (new Date(b.alertTimestamp || b.timestamp || 0) - new Date(a.alertTimestamp || a.timestamp || 0)))
+      .slice(0, 5);
+    return h('div', {className: 'card priority-queue-card'},
+      h('div', {className: 'ch'},
+        h('div', null,
+          h('div', {className: 'ct'}, 'Incident Priority Queue'),
+          h('div', {className: 'cs'}, 'Top incidents requiring analyst response now')
+        ),
+        h('span', {className: 'badge binfo'}, `${fmtNum(rows.length)} queued`)
+      ),
+      rows.length ? h('div', {className: 'priority-queue-list'},
+        rows.map(item => h('div', {className: 'priority-queue-row', key: `${item.id}-${item.documentId || item.alertTimestamp || item.timestamp}`},
+          h('span', {className: `badge ${item.badge || clsPriority(item.priority)}`}, item.priority || 'P3'),
+          h('span', {className: 'mono incident-id'}, item.caseId || item.id || 'WAZUH'),
+          h('span', {className: 'incident-title'}, item.description || item.title || 'Security event requires review'),
+          h('span', {className: 'mono source-ip'}, item.srcIp || item.agentIp || '--'),
+          h('span', {className: `badge ${normalizeQueueStatus(item.status) === 'Contained' ? 'blive' : normalizeQueueStatus(item.status) === 'Investigating' ? 'binfo' : 'bnew'}`}, normalizeQueueStatus(item.status)),
+          h('span', {className: 'mono elapsed'}, elapsedSince(item.alertTimestamp || item.timestamp || item.createdAt)),
+          h('button', {className: 'btn', onClick: respondToIncident}, 'Respond')
+        ))
+      ) : h('div', {className: 'cb'},
+        h('div', {className: 'empty-title'}, 'No active incidents'),
+        h('div', {className: 'empty-detail'}, `Last telemetry check: ${fmtDateTime(new Date())}. Awaiting telemetry from this workspace.`)
+      )
+    );
+  }
+
+  function FortiAnalyzerCard({data}) {
+    const fa = data?.fortianalyzer || {};
+    const configured = Boolean(fa.connected || fa.endpoint || fa.base_url);
+    const error = fa.error || '';
+    const status = error ? 'Unavailable' : configured ? 'Connected' : 'Connector ready';
+    return h('div', {className: 'card fortianalyzer-card'},
+      h('div', {className: 'ch'},
+        h('div', null,
+          h('div', {className: 'ct'}, 'FortiAnalyzer Evidence Connector'),
+          h('div', {className: 'cs'}, configured ? 'Evidence source configured for workspace telemetry' : 'Evidence layer prepared')
+        ),
+        h('span', {className: `badge ${configured ? 'blive' : error ? 'bhigh' : 'binfo'}`}, status)
+      ),
+      h('div', {className: 'cb'},
+        h('div', {className: 'apirow'},
+          h('span', {className: `adot ${configured ? 'ok' : error ? 'err' : 'warn'}`}),
+          h('span', null, 'Operational state'),
+          h('span', {style: {marginLeft: 'auto', color: 'var(--t2)'}}, configured ? 'Connected' : error ? 'Unavailable' : 'Awaiting endpoint')
+        ),
+        h('div', {className: 'apirow'},
+          h('span', {className: 'adot warn'}),
+          h('span', null, 'Current scope'),
+          h('span', {style: {marginLeft: 'auto', color: 'var(--t2)'}}, configured ? 'Evidence source active' : 'Ready for configuration')
+        ),
+        h('div', {className: 'empty-detail', style: {marginTop: 10}}, error ? 'FortiAnalyzer connector unavailable. Evidence collection will continue through configured integrations.' : 'FortiAnalyzer connector: ready for configuration. No ingestion claim is shown until the endpoint is connected.')
       )
     );
   }
@@ -569,6 +670,7 @@
           h('button', {className: 'btn btnp', onClick: openServiceRequest}, 'Open Service Request')
         )
       ),
+      h(ShiftSummary, {data, workqueue}),
       h('div', {className: 'krow'},
         h(KpiCard, {label: 'P1 - Critical Incidents', value: fmtNum(kpis.critical_incidents), detail: `<span class="up">${fmtNum(kpis.events ?? kpis.events_24h)}</span> alerts ${data?.range || range}`, critical: true}),
         h(KpiCard, {label: 'MTTD', value: kpis.mttd || 'N/A', detail: `<span class="dn">${kpis.mttd_detail || 'Incident lifecycle unavailable'}</span>`}),
@@ -578,14 +680,22 @@
       ),
       h('div', {className: 'aibox'},
         h('strong', null, 'SPARK Live Triage: '),
-        message ? message : error ? `Integration unavailable in this environment. Keeping last known state. ${error}` : (data?.triage || 'Loading live telemetry...')
+        message ? message : error ? `Integration unavailable in this environment. Keeping last known state for analyst review.` : (data?.triage || 'Consulting Wazuh Indexer and response telemetry...')
       ),
+      h(IncidentPriorityQueue, {items: workqueue}),
       h('div', {className: 'source-strip'},
         h(SourceBadge, {label: 'Wazuh', ok: status.wazuh}),
         h(SourceBadge, {label: 'FortiGate', ok: status.fortigate}),
         h(SourceBadge, {label: 'Shuffle', ok: status.shuffle})
       ),
       h('div', {className: 'g21'}, h(PostureScore, {data}), h(AlertVolumeChart, {timeline, total: (kpis.events ?? kpis.events_24h) || 0, range: data?.range || range})),
+      h('div', {className: 'g11'}, h(FortiAnalyzerCard, {data}), h('div', {className: 'card'},
+        h('div', {className: 'ch'}, h('div', null, h('div', {className: 'ct'}, 'Operational Next Step'), h('div', {className: 'cs'}, 'Analyst action guidance'))),
+        h('div', {className: 'cb'},
+          h('div', {className: 'empty-title'}, workqueue.length ? 'Respond to the highest-priority incident first.' : 'No active incidents.'),
+          h('div', {className: 'empty-detail'}, workqueue.length ? 'Use the queue above to open Incident Response, validate evidence and apply containment when required.' : updatedAt ? `Last telemetry check: ${fmtDateTime(updatedAt)}.` : 'Awaiting telemetry from this integration.')
+        )
+      )),
       h(WorkqueueTable, {items: workqueue, onCaseUpdate: () => load(range, true), onServiceRequest: createServiceRequest})
     );
   }
