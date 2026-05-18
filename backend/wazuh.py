@@ -5,6 +5,7 @@ Consulta alertas via OpenSearch (Wazuh Indexer).
 Fallback para SQLite quando o indexer não está disponível.
 """
 import time
+import os
 import sqlite3
 import requests
 import urllib3
@@ -157,6 +158,14 @@ def get_alerts_opensearch(indexer_base: str, user: str, password: str) -> dict:
 def get_alerts_sqlite_fallback(db_path: str) -> dict:
     """Fallback: lê contagens do SQLite quando o OpenSearch não responde."""
     conn = sqlite3.connect(db_path)
+    if not _table_exists(conn, "events"):
+        conn.close()
+        return {
+            "source": "sqlite-fallback-empty",
+            "levels": {"10": 0, "3": 0},
+            "alerts": [],
+            "stats":  {"total": 0, "critical": 0, "auth_failures": 0, "auth_success": 0},
+        }
     mal = conn.execute("SELECT COUNT(*) FROM events WHERE status='MALICIOUS'").fetchone()[0]
     sus = conn.execute("SELECT COUNT(*) FROM events WHERE status='SUSPICIOUS'").fetchone()[0]
     cln = conn.execute("SELECT COUNT(*) FROM events WHERE status='CLEAN'").fetchone()[0]
@@ -704,30 +713,65 @@ def get_compliance_risk_events(
 
 
 def _db(db_path: str) -> sqlite3.Connection:
+    directory = os.path.dirname(str(db_path))
+    if directory:
+        os.makedirs(directory, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
 
 
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        (table_name,),
+    ).fetchone()
+    return bool(row)
+
+
+def _empty_stats(source: str = "local-db-empty") -> dict:
+    from backend.tickets import get_blocked_ips
+    return {
+        "malicious": 0,
+        "suspicious": 0,
+        "benign": 0,
+        "clean": 0,
+        "pending": 0,
+        "internal": 0,
+        "total": 0,
+        "blocked": len(get_blocked_ips()),
+        "source": source,
+    }
+
+
 def get_stats(db_path: str) -> dict:
     conn = _db(db_path)
+    if not _table_exists(conn, "events"):
+        conn.close()
+        return _empty_stats("local-db-empty")
     c = conn.cursor()
     mal  = c.execute("SELECT COUNT(*) FROM events WHERE status='MALICIOUS'").fetchone()[0]
     sus  = c.execute("SELECT COUNT(*) FROM events WHERE status='SUSPICIOUS'").fetchone()[0]
     cln  = c.execute("SELECT COUNT(*) FROM events WHERE status='CLEAN'").fetchone()[0]
     inte = c.execute("SELECT COUNT(*) FROM events WHERE status='INTERNAL'").fetchone()[0]
+    pending = c.execute("SELECT COUNT(*) FROM events WHERE status='PENDING'").fetchone()[0]
     tot  = c.execute("SELECT COUNT(*) FROM events").fetchone()[0]
     conn.close()
     from backend.tickets import get_blocked_ips
     return {
         "malicious": mal, "suspicious": sus, "clean": cln,
+        "benign": cln, "pending": pending,
         "internal": inte, "total": tot,
         "blocked": len(get_blocked_ips()),
+        "source": "local-db",
     }
 
 
 def get_top_ips(db_path: str) -> list[dict]:
     conn = _db(db_path)
+    if not _table_exists(conn, "events"):
+        conn.close()
+        return []
     rows = conn.execute("""
         SELECT src_ip, status,
                COUNT(*) as hits,
@@ -746,6 +790,9 @@ def get_top_ips(db_path: str) -> list[dict]:
 
 def get_timeline(db_path: str) -> list[dict]:
     conn = _db(db_path)
+    if not _table_exists(conn, "events"):
+        conn.close()
+        return []
     rows = conn.execute("""
         SELECT strftime('%Y-%m-%d %H:00:00', timestamp) as hour,
                status, COUNT(*) as count
@@ -761,6 +808,9 @@ def get_timeline(db_path: str) -> list[dict]:
 
 def get_recent_events(db_path: str) -> list[dict]:
     conn = _db(db_path)
+    if not _table_exists(conn, "events"):
+        conn.close()
+        return []
     rows = conn.execute("""
         SELECT timestamp, src_ip, dst_ip, dst_port, protocol,
                status, action, abuse_score, country_code, isp
@@ -774,6 +824,9 @@ def get_recent_events(db_path: str) -> list[dict]:
 
 def get_incidents(db_path: str) -> list[dict]:
     conn = _db(db_path)
+    if not _table_exists(conn, "events"):
+        conn.close()
+        return []
     rows = conn.execute("""
         SELECT
           'INC-2026-' || printf('%04d', id) as incident_id,

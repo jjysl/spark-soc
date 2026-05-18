@@ -15,59 +15,102 @@ def _candidate_bases(base_url: str, backend_url: str | None = None) -> list[str]
 
 
 def get_status(base_url: str, api_key: str, backend_url: str | None = None) -> dict:
-    bases = _candidate_bases(base_url, backend_url)
-    if not bases:
-        return {"connected": False, "source": "not_configured"}
+    frontend = (base_url or "").rstrip("/")
+    backend = (backend_url or "").rstrip("/")
+    if not frontend and not backend:
+        return {
+            "connected": False,
+            "status": "not_configured",
+            "frontend_reachable": False,
+            "backend_reachable": False,
+            "api_authenticated": False,
+            "message": "Shuffle connector is not configured.",
+            "source": "not_configured",
+        }
 
-    for base in bases:
+    def probe(url: str, ok_statuses: set[int]) -> tuple[bool, int | None, str]:
+        if not url:
+            return False, None, "not_configured"
         try:
-            resp = requests.get(f"{base}/api/v1/health", timeout=3)
-            content_type = resp.headers.get("content-type", "")
-            payload = resp.json() if "json" in content_type else {}
-            if resp.ok and payload.get("success") is not False:
-                return {
-                    "connected": True,
-                    "source": f"{base}/api/v1/health",
-                    "status_code": resp.status_code,
-                    "items": 0,
-                }
-        except Exception:
-            pass
+            resp = requests.get(url, timeout=3)
+            return resp.status_code in ok_statuses, resp.status_code, ""
+        except requests.exceptions.Timeout:
+            return False, None, "timeout"
+        except requests.exceptions.ConnectionError:
+            return False, None, "connection_error"
+        except requests.exceptions.RequestException as exc:
+            return False, None, f"{type(exc).__name__}: {exc}"
 
-    headers_to_try = [
-        {"Authorization": f"Bearer {api_key}"} if api_key else {},
-        {"Authorization": api_key} if api_key else {},
-        {"X-API-Key": api_key} if api_key else {},
-        {},
-    ]
-    paths = ["/api/v1/workflows", "/api/v1/apps", "/api/v1/users"]
+    frontend_reachable, frontend_status, frontend_error = probe(frontend, {200, 301, 302, 401, 403, 404})
+    backend_root = backend or frontend
+    backend_reachable, backend_status, backend_error = probe(backend_root, {200, 301, 302, 401, 403, 404})
 
-    last_error = ""
-    for base in bases:
-        for path in paths:
-            for headers in headers_to_try:
-                try:
-                    resp = requests.get(f"{base}{path}", headers=headers, timeout=3)
-                    content_type = resp.headers.get("content-type", "")
-                    payload = resp.json() if "json" in content_type else {}
-                    if resp.ok and payload.get("success") is not False:
-                        items = payload.get("workflows") or payload.get("data") or payload.get("apps") or []
-                        return {
-                            "connected": True,
-                            "source": f"{base}{path}",
-                            "status_code": resp.status_code,
-                            "items": len(items) if isinstance(items, list) else 0,
-                        }
-                    if resp.status_code in (401, 403):
-                        last_error = f"{base}{path}: auth_{resp.status_code}"
-                    elif payload:
-                        last_error = f"{base}{path}: {payload.get('reason') or payload.get('message') or str(payload)[:120]}"
-                    else:
-                        last_error = f"{base}{path}: http_{resp.status_code}"
-                except Exception as exc:
-                    last_error = f"{base}{path}: {type(exc).__name__}: {exc}"
+    api_authenticated = False
+    auth_required = False
+    auth_failed = False
+    items = 0
+    api_status = None
+    api_source = f"{backend_root}/api/v1/getinfo" if backend_root else "shuffle"
+    headers_to_try = []
+    if api_key:
+        headers_to_try.extend([
+            {"Authorization": f"Bearer {api_key}"},
+            {"Authorization": api_key},
+            {"X-API-Key": api_key},
+        ])
+    headers_to_try.append({})
 
-    return {"connected": False, "source": "shuffle", "error": last_error or "unavailable"}
+    if backend_root:
+        for headers in headers_to_try:
+            try:
+                resp = requests.get(api_source, headers=headers, timeout=3)
+                api_status = resp.status_code
+                content_type = resp.headers.get("content-type", "")
+                payload = resp.json() if "json" in content_type else {}
+                if resp.ok and payload.get("success") is not False:
+                    api_authenticated = True
+                    data = payload.get("data") or payload.get("workflows") or payload.get("apps") or []
+                    items = len(data) if isinstance(data, list) else 0
+                    break
+                if resp.status_code == 401:
+                    auth_required = True
+                elif resp.status_code == 403:
+                    auth_failed = True
+            except requests.exceptions.Timeout:
+                backend_error = "timeout"
+            except requests.exceptions.ConnectionError:
+                backend_error = "connection_error"
+            except requests.exceptions.RequestException as exc:
+                backend_error = f"{type(exc).__name__}: {exc}"
+
+    reachable = frontend_reachable or backend_reachable
+    if api_authenticated:
+        status = "online"
+        message = "Shuffle Online"
+    elif reachable and api_key and (auth_required or auth_failed):
+        status = "auth_failed"
+        message = "Shuffle Auth Required"
+    elif reachable:
+        status = "auth_required"
+        message = "Shuffle Auth Required"
+    else:
+        status = "offline"
+        message = "Shuffle Offline"
+
+    return {
+        "connected": reachable,
+        "status": status,
+        "frontend_reachable": frontend_reachable,
+        "backend_reachable": backend_reachable,
+        "api_authenticated": api_authenticated,
+        "message": message,
+        "source": api_source if backend_root else frontend or "shuffle",
+        "status_code": api_status or backend_status or frontend_status,
+        "frontend_status_code": frontend_status,
+        "backend_status_code": backend_status,
+        "items": items,
+        "error": "" if reachable else (backend_error or frontend_error or "unavailable"),
+    }
 
 
 def dispatch_incident_evidence(webhook_url: str, workflow: str, payload: dict) -> dict:

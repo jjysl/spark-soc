@@ -51,9 +51,9 @@
     );
   }
 
-  function SourceBadge({label, ok, loading}) {
+  function SourceBadge({label, ok, loading, statusText}) {
     const state = loading ? 'loading' : (ok ? 'ok' : 'warn');
-    const suffix = loading ? 'Syncing' : (ok ? 'Online' : 'Partial');
+    const suffix = statusText || (loading ? 'Syncing' : (ok ? 'Online' : 'Partial'));
     return h('span', {className: `source-chip ${state}`},
       h('span', {className: 'source-dot'}),
       `${label} ${suffix}`
@@ -652,6 +652,7 @@
       wazuh: Boolean(data?.wazuh),
       fortigate: fortigate.source === 'fortigate-live',
       shuffle: Boolean(data?.shuffle?.connected),
+      shuffleAuthenticated: Boolean(data?.shuffle?.api_authenticated),
     }), [data]);
 
     if (!data) {
@@ -686,7 +687,7 @@
       h('div', {className: 'source-strip'},
         h(SourceBadge, {label: 'Wazuh', ok: status.wazuh}),
         h(SourceBadge, {label: 'FortiGate', ok: status.fortigate}),
-        h(SourceBadge, {label: 'Shuffle', ok: status.shuffle})
+        h(SourceBadge, {label: 'Shuffle', ok: status.shuffleAuthenticated, statusText: status.shuffleAuthenticated ? 'Online' : status.shuffle ? 'Auth Required' : 'Offline'})
       ),
       h('div', {className: 'g21'}, h(PostureScore, {data}), h(AlertVolumeChart, {timeline, total: (kpis.events ?? kpis.events_24h) || 0, range: data?.range || range})),
       h('div', {className: 'g11'}, h(FortiAnalyzerCard, {data}), h('div', {className: 'card'},

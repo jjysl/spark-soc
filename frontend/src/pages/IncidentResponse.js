@@ -56,11 +56,11 @@
     );
   }
 
-  function SourceChip({label, ok}) {
-    if (components.SourceChip) return h(components.SourceChip, {label, ok});
+  function SourceChip({label, ok, statusText}) {
+    if (components.SourceChip) return h(components.SourceChip, {label, ok, status: statusText});
     return h('span', {className: `source-chip ${ok ? 'ok' : 'warn'}`},
       h('span', {className: 'source-dot'}),
-      `${label} ${ok ? 'Online' : 'Offline'}`
+      statusText || `${label} ${ok ? 'Online' : 'Offline'}`
     );
   }
 
@@ -133,32 +133,34 @@
   }
 
   function ShuffleStatus({shuffle}) {
-    const ok = Boolean(shuffle?.connected);
+    const reachable = Boolean(shuffle?.connected);
+    const authenticated = Boolean(shuffle?.api_authenticated);
+    const label = authenticated ? 'Shuffle Online' : reachable ? 'Shuffle Auth Required' : 'Shuffle Offline';
     return h('div', {className: 'card'},
       h('div', {className: 'ch'},
         h('div', null,
           h('div', {className: 'ct'}, 'Shuffle SOAR Status'),
           h('div', {className: 'cs'}, 'Connectivity and basic endpoint discovery')
         ),
-        h('span', {className: `badge ${ok ? 'blive' : 'bhigh'}`}, ok ? 'Connected' : 'Connector unavailable')
+        h('span', {className: `badge ${authenticated ? 'blive' : reachable ? 'bwarn' : 'bhigh'}`}, label)
       ),
       h('div', {className: 'cb'},
         h('div', {className: 'apirow'},
-          h('span', {className: `adot ${ok ? 'ok' : 'err'}`}),
-          h('span', null, 'Status source'),
-          h('span', {style: {marginLeft: 'auto', color: 'var(--t2)'}}, shuffle?.source || 'shuffle')
+          h('span', {className: `adot ${shuffle?.frontend_reachable ? 'ok' : 'warn'}`}),
+          h('span', null, 'Frontend'),
+          h('span', {style: {marginLeft: 'auto', color: 'var(--t2)'}}, shuffle?.frontend_reachable ? 'Reachable' : 'Awaiting telemetry')
         ),
         h('div', {className: 'apirow'},
-          h('span', {className: `adot ${ok ? 'ok' : 'warn'}`}),
-          h('span', null, 'HTTP status'),
-          h('span', {style: {marginLeft: 'auto', color: 'var(--t2)'}}, shuffle?.status_code || 'N/A')
+          h('span', {className: `adot ${shuffle?.backend_reachable ? 'ok' : 'warn'}`}),
+          h('span', null, 'Backend API'),
+          h('span', {style: {marginLeft: 'auto', color: 'var(--t2)'}}, shuffle?.backend_reachable ? `Reachable (${shuffle?.backend_status_code || 'HTTP'})` : 'Awaiting telemetry')
         ),
         h('div', {className: 'apirow'},
-          h('span', {className: `adot ${ok && shuffle?.items ? 'ok' : 'warn'}`}),
-          h('span', null, 'Items discovered'),
-          h('span', {style: {marginLeft: 'auto', color: 'var(--t2)'}}, fmtNum(shuffle?.items))
+          h('span', {className: `adot ${authenticated ? 'ok' : 'warn'}`}),
+          h('span', null, 'API authentication'),
+          h('span', {style: {marginLeft: 'auto', color: 'var(--t2)'}}, authenticated ? 'Authenticated' : 'Auth required')
         ),
-        !ok ? h('div', {style: {fontSize: 11, color: 'var(--amber)', marginTop: 10}}, shuffle?.error || 'SOAR connector credentials are not available in this workspace.') : null
+        h('div', {style: {fontSize: 11, color: reachable ? 'var(--tm)' : 'var(--amber)', marginTop: 10}}, shuffle?.message || 'Awaiting telemetry from this integration.')
       )
     );
   }
@@ -1201,7 +1203,7 @@
       h(SparkTraceTimeline, {payload, evidence: lastEvidence, briefing: aiBriefing}),
       h('div', {className: 'source-strip'},
         h(SourceChip, {label: 'Wazuh Indexer', ok: wazuhOk}),
-        h(SourceChip, {label: 'Shuffle', ok: shuffleOk})
+        h(SourceChip, {label: 'Shuffle', ok: shuffleOk && payload.shuffle?.api_authenticated, statusText: payload.shuffle?.api_authenticated ? 'Online' : shuffleOk ? 'Auth Required' : 'Offline'})
       ),
       h(components.LoadingState && loading && !data ? components.LoadingState : React.Fragment, loading && !data ? {title: 'Consulting Wazuh Indexer...', detail: 'Collecting incident candidates, cases and response evidence for this workspace.'} : null),
       h('div', {className: 'g11'},
