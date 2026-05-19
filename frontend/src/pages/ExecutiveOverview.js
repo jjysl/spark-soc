@@ -430,29 +430,39 @@
 
   function FortiAnalyzerCard({data}) {
     const fa = data?.fortianalyzer || {};
-    const configured = Boolean(fa.connected || fa.endpoint || fa.base_url);
-    const error = fa.error || '';
-    const status = error ? 'Unavailable' : configured ? 'Connected' : 'Connector ready';
+    const connected = Boolean(fa.connected);
+    const configured = Boolean(fa.configured);
+    const statusValue = String(fa.status || '').toLowerCase();
+    const authIssue = statusValue.includes('auth');
+    const unavailable = ['timeout', 'unavailable', 'endpoint_error'].includes(statusValue);
+    const status = connected ? 'FortiAnalyzer Online' : authIssue ? 'FortiAnalyzer Auth Required' : unavailable ? 'FortiAnalyzer Unavailable' : 'FortiAnalyzer Connector Ready';
+    const badge = connected ? 'blive' : authIssue ? 'bwarn' : unavailable ? 'bhigh' : 'binfo';
+    const dot = connected ? 'ok' : unavailable ? 'err' : 'warn';
     return h('div', {className: 'card fortianalyzer-card'},
       h('div', {className: 'ch'},
         h('div', null,
           h('div', {className: 'ct'}, 'FortiAnalyzer Evidence Connector'),
-          h('div', {className: 'cs'}, configured ? 'Evidence source configured for workspace telemetry' : 'Evidence layer prepared')
+          h('div', {className: 'cs'}, 'Fortinet log and evidence layer')
         ),
-        h('span', {className: `badge ${configured ? 'blive' : error ? 'bhigh' : 'binfo'}`}, status)
+        h('span', {className: `badge ${badge}`}, status)
       ),
       h('div', {className: 'cb'},
         h('div', {className: 'apirow'},
-          h('span', {className: `adot ${configured ? 'ok' : error ? 'err' : 'warn'}`}),
+          h('span', {className: `adot ${dot}`}),
           h('span', null, 'Operational state'),
-          h('span', {style: {marginLeft: 'auto', color: 'var(--t2)'}}, configured ? 'Connected' : error ? 'Unavailable' : 'Awaiting endpoint')
+          h('span', {style: {marginLeft: 'auto', color: 'var(--t2)'}}, connected ? 'Online' : configured ? (authIssue ? 'Auth required' : 'Configured') : 'Awaiting endpoint')
         ),
         h('div', {className: 'apirow'},
-          h('span', {className: 'adot warn'}),
-          h('span', null, 'Current scope'),
-          h('span', {style: {marginLeft: 'auto', color: 'var(--t2)'}}, configured ? 'Evidence source active' : 'Ready for configuration')
+          h('span', {className: `adot ${connected ? 'ok' : 'warn'}`}),
+          h('span', null, 'Platform'),
+          h('span', {style: {marginLeft: 'auto', color: 'var(--t2)'}}, fa.platform || fa.platform_type || 'Evidence layer prepared')
         ),
-        h('div', {className: 'empty-detail', style: {marginTop: 10}}, error ? 'FortiAnalyzer connector unavailable. Evidence collection will continue through configured integrations.' : 'FortiAnalyzer connector: ready for configuration. No ingestion claim is shown until the endpoint is connected.')
+        h('div', {className: 'apirow'},
+          h('span', {className: `adot ${fa.version ? 'ok' : 'warn'}`}),
+          h('span', null, 'Version / Serial'),
+          h('span', {style: {marginLeft: 'auto', color: 'var(--t2)'}}, [fa.version, fa.build, fa.serial].filter(Boolean).join(' / ') || 'Not available')
+        ),
+        h('div', {className: 'empty-detail', style: {marginTop: 10}}, fa.message || (connected ? 'FortiAnalyzer evidence queries are available for analyst review.' : 'FortiAnalyzer connector: ready for configuration. No ingestion claim is shown until the endpoint is connected.'))
       )
     );
   }

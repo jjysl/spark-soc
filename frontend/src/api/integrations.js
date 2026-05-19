@@ -7,5 +7,7 @@
     getNetworkEndpoint: () => client.get('/spark/network-endpoint'),
     getAiStatus: () => client.get('/spark/ai/status'),
     getJiraStatus: () => client.get('/spark/jira/status'),
+    getFortiAnalyzerStatus: () => client.get('/spark/fortianalyzer/status'),
+    getFortiAnalyzerEvidence: (ip, limit = 10) => client.get(`/spark/fortianalyzer/evidence?ip=${encodeURIComponent(ip || '')}&limit=${encodeURIComponent(limit)}`),
   };
 })();

@@ -10,6 +10,7 @@
   function sourceOk(data, key) {
     if (!data || data.source === 'loading') return false;
     if (key === 'fortigate') return data.fortigate?.source === 'fortigate-live' && !data.errors?.fortigate;
+    if (key === 'fortianalyzer') return Boolean(data.fortianalyzer?.connected);
     return !data.errors?.[key];
   }
 
@@ -21,10 +22,18 @@
     );
   }
 
-  function SourceChip({label, ok}) {
+  function fortiAnalyzerLabel(fa) {
+    const status = String(fa?.status || '').toLowerCase();
+    if (fa?.connected || status === 'online') return 'FortiAnalyzer Online';
+    if (status.includes('auth')) return 'FortiAnalyzer Auth Required';
+    if (['timeout', 'unavailable', 'endpoint_error'].includes(status)) return 'FortiAnalyzer Unavailable';
+    return 'FortiAnalyzer Connector Ready';
+  }
+
+  function SourceChip({label, ok, statusText}) {
     return h('span', {className: `source-chip ${ok ? 'ok' : 'warn'}`},
       h('span', {className: 'source-dot'}),
-      `${label} ${ok ? 'Online' : 'Offline'}`
+      statusText || `${label} ${ok ? 'Online' : 'Offline'}`
     );
   }
 
@@ -360,6 +369,7 @@
   function TopologySummary({data}) {
     const fgOk = sourceOk(data, 'fortigate');
     const wzOk = sourceOk(data, 'wazuh_api');
+    const faOk = sourceOk(data, 'fortianalyzer');
     const agents = data?.wazuh?.agents || [];
     return h('div', {className: 'card'},
       h('div', {className: 'ch'},
@@ -371,6 +381,7 @@
       h('div', {className: 'cb'},
         h('div', {className: 'apirow'}, h('span', {className: `adot ${fgOk ? 'ok' : 'err'}`}), h('span', null, 'FortiGate Monitor API'), h('span', {style: {marginLeft: 'auto', color: fgOk ? 'var(--green)' : 'var(--amber)'}}, fgOk ? 'online' : 'offline')),
         h('div', {className: 'apirow'}, h('span', {className: `adot ${wzOk ? 'ok' : 'err'}`}), h('span', null, 'Wazuh Manager API'), h('span', {style: {marginLeft: 'auto', color: wzOk ? 'var(--green)' : 'var(--amber)'}}, wzOk ? 'online' : 'offline')),
+        h('div', {className: 'apirow'}, h('span', {className: `adot ${faOk ? 'ok' : 'warn'}`}), h('span', null, 'FortiAnalyzer evidence layer'), h('span', {style: {marginLeft: 'auto', color: faOk ? 'var(--green)' : 'var(--amber)'}}, fortiAnalyzerLabel(data?.fortianalyzer))),
         h('div', {className: 'apirow'}, h('span', {className: `adot ${agents.length ? 'ok' : 'warn'}`}), h('span', null, 'Registered endpoint agents'), h('span', {style: {marginLeft: 'auto'}}, fmtNum(agents.length))),
         h('div', {style: {fontSize: 11, color: 'var(--tm)', marginTop: 10}}, 'Protocol distribution, anomalous links and UEBA remain in review until validated telemetry is available.')
       )
@@ -459,6 +470,7 @@
     };
     const fgOk = sourceOk(payload, 'fortigate');
     const wzOk = sourceOk(payload, 'wazuh_api');
+    const faOk = sourceOk(payload, 'fortianalyzer');
     const disconnected = Number(payload.wazuh?.disconnected || 0);
     const pending = Number(payload.wazuh?.pending || 0);
     const atRisk = disconnected + pending;
@@ -486,13 +498,15 @@
       ),
       h('div', {className: 'source-strip'},
         h(SourceChip, {label: 'FortiGate', ok: fgOk}),
-        h(SourceChip, {label: 'Wazuh Agents', ok: wzOk})
+        h(SourceChip, {label: 'Wazuh Agents', ok: wzOk}),
+        h(SourceChip, {label: 'FortiAnalyzer', ok: faOk, statusText: fortiAnalyzerLabel(payload.fortianalyzer)})
       ),
       h('div', {className: 'g4'},
         h(KpiCard, {label: 'Active Sessions', value: fgOk ? fmtNum(payload.fortigate?.sessions) : 'N/A', detail: fgOk ? '<span class="dn">FortiGate resource usage</span>' : '<span class="up">FortiGate connector unavailable</span>'}),
         h(KpiCard, {label: 'FortiGate CPU', value: fgOk ? `${payload.fortigate?.cpu || 0}%` : 'N/A', detail: fgOk ? 'Current utilization' : 'Awaiting Monitor API telemetry'}),
         h(KpiCard, {label: 'Firewall Policies', value: fgOk ? fmtNum(payload.fortigate?.policies?.length) : 'N/A', detail: fgOk ? '<span class="dn">FortiOS CMDB</span>' : '<span class="up">Policy connector unavailable</span>'}),
-        h(KpiCard, {label: 'Monitored Agents', value: wzOk ? fmtNum(payload.wazuh?.total) : 'N/A', detail: wzOk ? `<span class="dn">${fmtNum(payload.wazuh?.active)} active</span>` : '<span class="up">Wazuh connector unavailable</span>'})
+        h(KpiCard, {label: 'Monitored Agents', value: wzOk ? fmtNum(payload.wazuh?.total) : 'N/A', detail: wzOk ? `<span class="dn">${fmtNum(payload.wazuh?.active)} active</span>` : '<span class="up">Wazuh connector unavailable</span>'}),
+        h(KpiCard, {label: 'FortiAnalyzer', value: faOk ? 'Online' : 'Ready', detail: faOk ? '<span class="dn">Fortinet evidence layer connected</span>' : '<span class="up">Connector ready for configuration</span>'})
       ),
       h('div', {className: 'g11'},
         h(FortiGateMetrics, {fortigate: payload.fortigate, ok: fgOk}),

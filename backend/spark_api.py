@@ -13,7 +13,7 @@ from flask import Blueprint, jsonify, request
 
 import config
 from backend import tickets as ticket_store
-from backend import fortigate, wazuh, ai_proxy, shuffle, jira
+from backend import fortigate, fortianalyzer, wazuh, ai_proxy, shuffle, jira
 
 spark_bp = Blueprint("spark", __name__)
 
@@ -60,6 +60,13 @@ def _block_config() -> dict:
         "srcintf": getattr(config, "FORTIGATE_BLOCK_SRCINTF", "any"),
         "dstintf": getattr(config, "FORTIGATE_BLOCK_DSTINTF", "any"),
     }
+
+
+def _fortianalyzer_config() -> tuple[str, str]:
+    return (
+        getattr(config, "FORTIANALYZER_BASE_URL", "") or "",
+        getattr(config, "FORTIANALYZER_API_KEY", "") or "",
+    )
 
 
 def _record_fortigate_evidence(action: str, status: str, payload: dict, case_id: str = "", ticket_id: str = "") -> dict:
@@ -225,6 +232,51 @@ def _build_posture(alert_data: dict, agents: dict, fortigate_data: dict, shuffle
 @spark_bp.route("/spark/fortigate-status")
 def fortigate_status():
     data = fortigate.get_resource_usage(config.FORTIGATE_BASE_URL, config.FORTIGATE_API_KEY)
+    return jsonify(data)
+
+
+@spark_bp.route("/spark/fortianalyzer/status")
+def fortianalyzer_status():
+    try:
+        base_url, api_key = _fortianalyzer_config()
+        data = fortianalyzer.get_status(base_url, api_key)
+    except Exception as exc:
+        data = {
+            "configured": bool(getattr(config, "FORTIANALYZER_BASE_URL", "")),
+            "connected": False,
+            "status": "endpoint_error",
+            "source": "fortianalyzer",
+            "message": "FortiAnalyzer connector status is unavailable.",
+            "endpoint_used": "",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    return jsonify(data)
+
+
+@spark_bp.route("/spark/fortianalyzer/evidence")
+def fortianalyzer_evidence():
+    ip = request.args.get("ip", "")
+    try:
+        limit = int(request.args.get("limit", 10))
+    except (TypeError, ValueError):
+        limit = 10
+    try:
+        base_url, api_key = _fortianalyzer_config()
+        data = fortianalyzer.get_evidence_for_ip(base_url, api_key, ip, limit=limit)
+    except Exception as exc:
+        data = {
+            "configured": bool(getattr(config, "FORTIANALYZER_BASE_URL", "")),
+            "connected": False,
+            "status": "endpoint_error",
+            "source": "fortianalyzer",
+            "ip": ip or "",
+            "evidence_status": "endpoint_error",
+            "message": "FortiAnalyzer evidence search is unavailable.",
+            "log_count": 0,
+            "items": [],
+            "references": [],
+            "error": f"{type(exc).__name__}: {exc}",
+        }
     return jsonify(data)
 
 
@@ -471,7 +523,8 @@ def _build_fortigate_correlations(alerts: list[dict], fortigate_data: dict) -> l
 @spark_bp.route("/spark/network-endpoint")
 def network_endpoint():
     errors: dict[str, str] = {}
-    executor = ThreadPoolExecutor(max_workers=3)
+    fortianalyzer_base, fortianalyzer_key = _fortianalyzer_config()
+    executor = ThreadPoolExecutor(max_workers=4)
     try:
         futures = {
             "fortigate": executor.submit(
@@ -495,6 +548,11 @@ def network_endpoint():
                 [],
                 20,
             ),
+            "fortianalyzer": executor.submit(
+                fortianalyzer.get_status,
+                fortianalyzer_base,
+                fortianalyzer_key,
+            ),
         }
         try:
             fortigate_data = futures["fortigate"].result(timeout=5)
@@ -516,6 +574,13 @@ def network_endpoint():
             alert_data = {"alerts": [], "total": 0, "error": "timeout"}
         except Exception as exc:
             alert_data = {"alerts": [], "total": 0, "error": str(exc)}
+
+        try:
+            fortianalyzer_data = futures["fortianalyzer"].result(timeout=5)
+        except TimeoutError:
+            fortianalyzer_data = {"configured": bool(fortianalyzer_base and fortianalyzer_key), "connected": False, "source": "fortianalyzer", "status": "timeout", "message": "FortiAnalyzer connector timed out.", "error": "timeout"}
+        except Exception as exc:
+            fortianalyzer_data = {"configured": bool(fortianalyzer_base and fortianalyzer_key), "connected": False, "source": "fortianalyzer", "status": "endpoint_error", "message": "FortiAnalyzer connector status is unavailable.", "error": str(exc)}
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
 
@@ -548,6 +613,7 @@ def network_endpoint():
         "source": "live" if not errors else "partial",
         "errors": errors,
         "fortigate": fortigate_data,
+        "fortianalyzer": fortianalyzer_data,
         "wazuh": endpoint_status,
         "wazuh_alerts": {
             "total": alert_data.get("total", 0),
@@ -569,7 +635,8 @@ def incident_response():
     if time_range not in EXECUTIVE_RANGES:
         time_range = "24h"
     errors: dict[str, str] = {}
-    executor = ThreadPoolExecutor(max_workers=2)
+    fortianalyzer_base, fortianalyzer_key = _fortianalyzer_config()
+    executor = ThreadPoolExecutor(max_workers=3)
     try:
         futures = {
             "shuffle": executor.submit(
@@ -588,6 +655,11 @@ def incident_response():
                 [],
                 25,
             ),
+            "fortianalyzer": executor.submit(
+                fortianalyzer.get_status,
+                fortianalyzer_base,
+                fortianalyzer_key,
+            ),
         }
         try:
             shuffle_data = futures["shuffle"].result(timeout=5)
@@ -602,6 +674,27 @@ def incident_response():
             alert_data = {"total": 0, "alerts": [], "counts": {"p1": 0, "p2": 0, "p3": 0, "p4": 0}, "error": "timeout"}
         except Exception as exc:
             alert_data = {"total": 0, "alerts": [], "counts": {"p1": 0, "p2": 0, "p3": 0, "p4": 0}, "error": str(exc)}
+
+        try:
+            fortianalyzer_data = futures["fortianalyzer"].result(timeout=5)
+        except TimeoutError:
+            fortianalyzer_data = {
+                "configured": bool(fortianalyzer_base and fortianalyzer_key),
+                "connected": False,
+                "status": "timeout",
+                "source": "fortianalyzer",
+                "message": "FortiAnalyzer connector timed out.",
+                "error": "timeout",
+            }
+        except Exception as exc:
+            fortianalyzer_data = {
+                "configured": bool(fortianalyzer_base and fortianalyzer_key),
+                "connected": False,
+                "status": "endpoint_error",
+                "source": "fortianalyzer",
+                "message": "FortiAnalyzer connector status is unavailable.",
+                "error": str(exc),
+            }
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
 
@@ -642,6 +735,7 @@ def incident_response():
         "range": time_range,
         "errors": errors,
         "shuffle": shuffle_data,
+        "fortianalyzer": fortianalyzer_data,
         "wazuh": {
             "total": alert_data.get("total", 0),
             "counts": alert_data.get("counts", {}),
@@ -760,7 +854,8 @@ def executive_overview():
 
     errors: dict[str, str] = {}
 
-    executor = ThreadPoolExecutor(max_workers=4)
+    fortianalyzer_base, fortianalyzer_key = _fortianalyzer_config()
+    executor = ThreadPoolExecutor(max_workers=5)
     try:
         futures = {
             "wazuh_indexer": executor.submit(
@@ -786,6 +881,11 @@ def executive_overview():
                 config.SHUFFLE_BASE_URL,
                 config.SHUFFLE_API_KEY,
                 getattr(config, "SHUFFLE_BACKEND_URL", ""),
+            ),
+            "fortianalyzer": executor.submit(
+                fortianalyzer.get_status,
+                fortianalyzer_base,
+                fortianalyzer_key,
             ),
         }
 
@@ -820,6 +920,27 @@ def executive_overview():
             shuffle_data = {"connected": False, "source": "shuffle", "error": "timeout"}
         if not shuffle_data.get("connected"):
             errors["shuffle"] = shuffle_data.get("error", "offline")
+
+        try:
+            fortianalyzer_data = futures["fortianalyzer"].result(timeout=5)
+        except TimeoutError:
+            fortianalyzer_data = {
+                "configured": bool(fortianalyzer_base and fortianalyzer_key),
+                "connected": False,
+                "source": "fortianalyzer",
+                "status": "timeout",
+                "message": "FortiAnalyzer connector timed out.",
+                "error": "timeout",
+            }
+        except Exception as exc:
+            fortianalyzer_data = {
+                "configured": bool(fortianalyzer_base and fortianalyzer_key),
+                "connected": False,
+                "source": "fortianalyzer",
+                "status": "endpoint_error",
+                "message": "FortiAnalyzer connector status is unavailable.",
+                "error": str(exc),
+            }
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
 
@@ -831,6 +952,8 @@ def executive_overview():
         fortigate_data = {"source": "offline", "cpu": 0, "mem": 0, "sessions": 0, "error": "unavailable"}
     if "shuffle_data" not in locals():
         shuffle_data = {"connected": False, "source": "shuffle", "error": "unavailable"}
+    if "fortianalyzer_data" not in locals():
+        fortianalyzer_data = fortianalyzer.get_status(fortianalyzer_base, fortianalyzer_key)
 
     alerts = alert_data.get("alerts", [])
     promoted_cases = ticket_store.promote_alerts_to_cases(alerts, SLA_POLICY_MINUTES) if alerts else []
@@ -838,16 +961,6 @@ def executive_overview():
     lifecycle_metrics = ticket_store.get_incident_lifecycle_metrics()
     workqueue, sla_summary = _build_workqueue(case_records)
     posture = _build_posture(alert_data, agents, fortigate_data, shuffle_data, sla_summary)
-    fortianalyzer_base = getattr(config, "FORTIANALYZER_BASE_URL", "") or ""
-    fortianalyzer_key = getattr(config, "FORTIANALYZER_API_KEY", "") or ""
-    fortianalyzer_data = {
-        "configured": bool(fortianalyzer_base and fortianalyzer_key),
-        "connected": False,
-        "source": "fortianalyzer",
-        "status": "connector_ready" if not fortianalyzer_base else "configured",
-        "message": "FortiAnalyzer connector: ready for configuration" if not fortianalyzer_base else "FortiAnalyzer endpoint configured; evidence collection not enabled in this release.",
-    }
-
     top_alert = alerts[0] if alerts else {}
     triage = (
         f"Wazuh Indexer: {alert_data.get('total', 0)} alerts in {time_range}. "

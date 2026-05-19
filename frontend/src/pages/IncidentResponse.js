@@ -313,6 +313,7 @@
     const [aiBriefingLoading, setAiBriefingLoading] = useState(false);
     const [aiProvider, setAiProvider] = useState({provider: 'none', mode: 'deterministic_fallback'});
     const [evidenceHash, setEvidenceHash] = useState('');
+    const [fortiAnalyzerEvidence, setFortiAnalyzerEvidence] = useState(null);
     const toast = hooks.useToast ? hooks.useToast() : {pushToast: () => {}};
 
     async function load() {
@@ -502,21 +503,42 @@
       );
     }
 
-    function fortiAnalyzerEvidenceRef(payload) {
-      const fa = payload?.fortianalyzer || {};
-      if (fa.connected || fa.endpoint || fa.base_url) return fa.evidence_ref || 'Configured - awaiting evidence reference';
-      return 'Not configured / Awaiting connector';
+    function fortiAnalyzerStatusLabel(fa) {
+      const status = String(fa?.status || '').toLowerCase();
+      if (fa?.connected || status === 'online') return 'FortiAnalyzer Online';
+      if (status.includes('auth')) return 'FortiAnalyzer Auth Required';
+      if (['timeout', 'unavailable', 'endpoint_error'].includes(status)) return 'FortiAnalyzer Unavailable';
+      return 'FortiAnalyzer Connector Ready';
     }
 
-    function evidencePackSections(evidence, payload, candidate) {
+    function fortiAnalyzerEvidenceRef(payload, evidenceResult, sourceIp) {
+      const fa = payload?.fortianalyzer || {};
+      const searchedIp = evidenceResult?.ip || sourceIp || 'not available';
+      if (!fa.configured) return `Status: Connector Ready | Source IP searched: ${searchedIp} | Evidence status: Awaiting connector | Log count: 0`;
+      if (evidenceResult?.evidence_status === 'evidence_collected') {
+        const refs = (evidenceResult.references || [])
+          .slice(0, 3)
+          .map(item => [item.policyid ? `policy ${item.policyid}` : '', item.logid ? `log ${item.logid}` : '', item.action || ''].filter(Boolean).join(' / '))
+          .filter(Boolean)
+          .join('; ');
+        return `Status: ${fortiAnalyzerStatusLabel(fa)} | Source IP searched: ${searchedIp} | Evidence status: Evidence collected | Log count: ${evidenceResult.log_count || 0}${refs ? ` | References: ${refs}` : ''}`;
+      }
+      if (evidenceResult?.evidence_status) {
+        return `Status: ${fortiAnalyzerStatusLabel(fa)} | Source IP searched: ${searchedIp} | Evidence status: ${evidenceResult.evidence_status} | Log count: ${evidenceResult.log_count || 0} | ${evidenceResult.message || 'Evidence query pending analyst review.'}`;
+      }
+      return `Status: ${fortiAnalyzerStatusLabel(fa)} | Source IP searched: ${searchedIp} | Evidence status: Evidence pending | Log count: 0 | FortiAnalyzer evidence is not confirmed until log records are returned by the connector.`;
+    }
+
+    function evidencePackSections(evidence, payload, candidate, faEvidence) {
       const score = containmentScore(evidence);
+      const sourceIp = evidence?.ip || caseIp(candidate) || '';
       return [
         ['Executive Summary', `${caseTitle(candidate)}. Severity ${candidate?.priority || candidate?.severity || '--'} with source ${caseIp(candidate) || evidence?.ip || '--'} targeting ${caseTarget(candidate)}.`],
         ['Technical Evidence', `Wazuh alerts: ${fmtNum(payload.wazuh?.total)}. Rule: ${candidate?.rule_id || '--'}. MITRE: ${caseMitre(candidate)}.`],
         ['Response Actions', `FortiGate object ${containmentObjectName(evidence) || '--'} added to ${containmentGroupName(evidence) || 'SPARK_BLOCKLIST'} with policy ${containmentPolicyName(evidence) || 'SPARK_AUTO_BLOCK'}.`],
         ['Containment Proof', `Evidence ID ${evidence?.evidence_id || '--'}. Containment confidence ${score}%. Status ${evidence?.status || 'Awaiting response evidence'}.`],
         ['Integrity', evidenceHash ? `SHA256:${evidenceHash}` : 'SHA256 pending evidence payload generation.'],
-        ['FortiAnalyzer Evidence Reference', fortiAnalyzerEvidenceRef(payload)],
+        ['FortiAnalyzer Evidence Layer', fortiAnalyzerEvidenceRef(payload, faEvidence, sourceIp)],
         ['Compliance Evidence', 'Technical evidence is available for analyst review and auditor handoff. This is not automatic certification.'],
         ['Next Steps', 'Validate traffic-path enforcement, review related alerts, update the case owner and attach Evidence Pack to the customer workspace.'],
       ];
@@ -535,7 +557,7 @@
       return Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join('');
     }
 
-    async function buildEvidencePackPayload(evidence, payload, candidate, briefing) {
+    async function buildEvidencePackPayload(evidence, payload, candidate, briefing, faEvidence) {
       const actions = Array.isArray(payload?.actions) ? payload.actions.slice(0, 12) : [];
       if (evidence) {
         actions.unshift({
@@ -572,18 +594,25 @@
         response_actions: actions.map(sanitizeOperationalObject),
         ai_briefing_summary: briefing?.sections?.find(([title]) => title === 'Analysis')?.[1] || 'not available',
         compliance_evidence_refs: ['NIST CSF 2.0 Detect', 'NIST CSF 2.0 Respond', 'ISO 27001:2022 evidence review'],
-        fortianalyzer_evidence_ref: fortiAnalyzerEvidenceRef(payload),
+        fortianalyzer: {
+          status: fortiAnalyzerStatusLabel(payload?.fortianalyzer),
+          source_ip_searched: faEvidence?.ip || caseIp(candidate) || evidence?.ip || 'not available',
+          evidence_status: faEvidence?.evidence_status || 'evidence_pending',
+          log_count: faEvidence?.log_count || 0,
+          references: faEvidence?.references || [],
+          message: faEvidence?.message || 'FortiAnalyzer evidence is pending until connector logs are returned.',
+        },
       };
     }
 
-    async function buildEvidencePackText(evidence, payload, candidate, briefing) {
-      const pack = await buildEvidencePackPayload(evidence, payload, candidate, briefing);
+    async function buildEvidencePackText(evidence, payload, candidate, briefing, faEvidence) {
+      const pack = await buildEvidencePackPayload(evidence, payload, candidate, briefing, faEvidence);
       const hash = await sha256Hex(stableStringify(pack));
       return `${JSON.stringify({...pack, integrity: {algorithm: 'SHA-256', hash}}, null, 2)}\n`;
     }
 
-    function EvidencePack({evidence, payload, candidate, onCopy, onExport, onCopyHash, hash}) {
-      const sections = evidencePackSections(evidence, payload, candidate);
+    function EvidencePack({evidence, payload, candidate, fortiAnalyzerEvidence, onCopy, onExport, onCopyHash, hash}) {
+      const sections = evidencePackSections(evidence, payload, candidate, fortiAnalyzerEvidence);
       return h('div', {className: 'card'},
         h('div', {className: 'ch'},
           h('div', null, h('div', {className: 'ct'}, 'Evidence Pack'), h('div', {className: 'cs'}, 'Audit-ready response summary for MDR handoff')),
@@ -688,12 +717,39 @@
 
     useEffect(() => {
       let active = true;
-      buildEvidencePackPayload(lastEvidence, payload, briefingCandidate, aiBriefing)
+      buildEvidencePackPayload(lastEvidence, payload, briefingCandidate, aiBriefing, fortiAnalyzerEvidence)
         .then(pack => sha256Hex(stableStringify(pack)))
         .then(hash => { if (active) setEvidenceHash(hash); })
         .catch(() => { if (active) setEvidenceHash(''); });
       return () => { active = false; };
-    }, [lastEvidence, data, aiBriefing]);
+    }, [lastEvidence, data, aiBriefing, fortiAnalyzerEvidence]);
+
+    useEffect(() => {
+      const fa = payload?.fortianalyzer || {};
+      const targetIp = lastEvidence?.ip || caseIp(briefingCandidate);
+      if (!targetIp || !fa.configured || !api.incidents.getFortiAnalyzerEvidence) {
+        setFortiAnalyzerEvidence(null);
+        return;
+      }
+      let active = true;
+      api.incidents.getFortiAnalyzerEvidence(targetIp, 10)
+        .then(result => { if (active) setFortiAnalyzerEvidence(result); })
+        .catch(err => {
+          if (active) {
+            setFortiAnalyzerEvidence({
+              configured: true,
+              connected: Boolean(fa.connected),
+              status: 'evidence_pending',
+              evidence_status: 'evidence_pending',
+              ip: targetIp,
+              log_count: 0,
+              references: [],
+              message: `FortiAnalyzer evidence query pending analyst review: ${err.message}`,
+            });
+          }
+        });
+      return () => { active = false; };
+    }, [lastEvidence?.ip, briefingCandidate?.src_ip, briefingCandidate?.source_ip, briefingCandidate?.agent_ip, payload?.fortianalyzer?.configured, payload?.fortianalyzer?.connected]);
 
     function sanitizeOperationalText(value) {
       if (value === undefined || value === null) return '';
@@ -980,7 +1036,7 @@
 
     async function copyEvidencePack() {
       try {
-        const text = await buildEvidencePackText(lastEvidence, payload, briefingCandidate, aiBriefing);
+        const text = await buildEvidencePackText(lastEvidence, payload, briefingCandidate, aiBriefing, fortiAnalyzerEvidence);
         await copyText(text);
         toast.pushToast({tone: 'success', title: 'Evidence Pack copied', message: 'Structured evidence is ready for handoff.'});
       } catch (err) {
@@ -990,7 +1046,7 @@
 
     async function exportEvidencePack() {
       try {
-        const text = await buildEvidencePackText(lastEvidence, payload, briefingCandidate, aiBriefing);
+        const text = await buildEvidencePackText(lastEvidence, payload, briefingCandidate, aiBriefing, fortiAnalyzerEvidence);
         const blob = new Blob([text], {type: 'application/json'});
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -1203,11 +1259,12 @@
       h(SparkTraceTimeline, {payload, evidence: lastEvidence, briefing: aiBriefing}),
       h('div', {className: 'source-strip'},
         h(SourceChip, {label: 'Wazuh Indexer', ok: wazuhOk}),
-        h(SourceChip, {label: 'Shuffle', ok: shuffleOk && payload.shuffle?.api_authenticated, statusText: payload.shuffle?.api_authenticated ? 'Online' : shuffleOk ? 'Auth Required' : 'Offline'})
+        h(SourceChip, {label: 'Shuffle', ok: shuffleOk && payload.shuffle?.api_authenticated, statusText: payload.shuffle?.api_authenticated ? 'Online' : shuffleOk ? 'Auth Required' : 'Offline'}),
+        h(SourceChip, {label: 'FortiAnalyzer', ok: Boolean(payload.fortianalyzer?.connected), statusText: fortiAnalyzerStatusLabel(payload.fortianalyzer)})
       ),
       h(components.LoadingState && loading && !data ? components.LoadingState : React.Fragment, loading && !data ? {title: 'Consulting Wazuh Indexer...', detail: 'Collecting incident candidates, cases and response evidence for this workspace.'} : null),
       h('div', {className: 'g11'},
-        h(EvidencePack, {evidence: lastEvidence, payload, candidate: briefingCandidate, onCopy: copyEvidencePack, onExport: exportEvidencePack, onCopyHash: copyEvidenceHash, hash: evidenceHash}),
+        h(EvidencePack, {evidence: lastEvidence, payload, candidate: briefingCandidate, fortiAnalyzerEvidence, onCopy: copyEvidencePack, onExport: exportEvidencePack, onCopyHash: copyEvidenceHash, hash: evidenceHash}),
         h(ContainmentConfidence, {evidence: lastEvidence})
       ),
       h(AiBriefingCard, {briefing: aiBriefing}),
