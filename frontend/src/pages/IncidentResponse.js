@@ -76,6 +76,10 @@
     return item?.src_ip || item?.source_ip || item?.agent_ip || '';
   }
 
+  function caseDestinationIp(item) {
+    return item?.dst_ip || item?.destination_ip || item?.dest_ip || item?.target_ip || '';
+  }
+
   function caseTitle(item) {
     return item?.title || item?.description || 'Wazuh alert';
   }
@@ -306,6 +310,7 @@
     const [updatedAt, setUpdatedAt] = useState(null);
     const [lastEvidence, setLastEvidence] = useState(null);
     const [blocklist, setBlocklist] = useState([]);
+    const [destinationBlocklist, setDestinationBlocklist] = useState([]);
     const [blockTarget, setBlockTarget] = useState(null);
     const [unblockTarget, setUnblockTarget] = useState(null);
     const [unblockReason, setUnblockReason] = useState('');
@@ -327,13 +332,15 @@
     async function load() {
       setLoading(true);
       try {
-        const [payload, fgBlocklist, mlPayload] = await Promise.all([
+        const [payload, fgBlocklist, fgDestinationBlocklist, mlPayload] = await Promise.all([
           api.incidents.getIncidentResponse(range),
           api.fortigate.getBlocklist().catch(err => ({items: [], status: 'error', message: err.message})),
+          api.fortigate.getDestinationBlocklist ? api.fortigate.getDestinationBlocklist().catch(err => ({items: [], status: 'error', message: err.message})) : Promise.resolve({items: []}),
           api.ml?.getInsights ? api.ml.getInsights(30).catch(() => null) : Promise.resolve(null),
         ]);
         setData(payload);
         setBlocklist(fgBlocklist.items || []);
+        setDestinationBlocklist(fgDestinationBlocklist.items || []);
         setMlInsights(mlPayload);
         setUpdatedAt(new Date());
         setError('');
@@ -542,14 +549,21 @@
     function evidencePackSections(evidence, payload, candidate, faEvidence, mlScore) {
       const score = containmentScore(evidence);
       const sourceIp = evidence?.ip || caseIp(candidate) || '';
+      const direction = evidence?.fortigate_action || evidence?.action || (String(containmentGroupName(evidence)).includes('EGRESS') ? 'destination_block' : 'source_block');
+      const mlRisk = responseResult?.ml_risk || mlScore || {};
       return [
         ['Executive Summary', `${caseTitle(candidate)}. Severity ${candidate?.priority || candidate?.severity || '--'} with source ${caseIp(candidate) || evidence?.ip || '--'} targeting ${caseTarget(candidate)}.`],
         ['Technical Evidence', `Wazuh alerts: ${fmtNum(payload.wazuh?.total)}. Rule: ${candidate?.rule_id || '--'}. MITRE: ${caseMitre(candidate)}.`],
+        ['IOC Enrichment', enrichmentResult ? `IOC ${enrichmentResult.ip || enrichmentResult.source_ip || '--'} classified as ${enrichmentResult.ip_type || '--'}. Direction: ${enrichmentResult.direction_recommendation || '--'}. Recommendation: ${enrichmentResult.recommended_action || '--'}. Reasons: ${(enrichmentResult.reasons || []).join(' ') || 'No local enrichment findings.'}` : 'No IOC enrichment has been executed for this incident yet.'],
+        ['Response Direction', `${direction || 'not executed'} | Policy applied. Runtime enforcement depends on traffic path validation.`],
         ['ML Risk Insights', mlScore ? `Score ${mlScore.risk_score}/100 (${mlScore.risk_band}) from ${mlScore.model_type || 'deterministic_scoring_v1'}. Recommended action: ${mlScore.recommended_action || 'requires analyst review'}.` : 'No persisted deterministic score is attached yet. Scores appear after analyst-approved response actions or manual scoring.'],
+        ['FortiGate Enforcement', `Object ${containmentObjectName(evidence) || '--'} | Group ${containmentGroupName(evidence) || '--'} | Policy ${containmentPolicyName(evidence) || '--'} | Action ${direction || '--'}.`],
         ['Response Actions', `FortiGate object ${containmentObjectName(evidence) || '--'} added to ${containmentGroupName(evidence) || 'SPARK_BLOCKLIST'} with policy ${containmentPolicyName(evidence) || 'SPARK_AUTO_BLOCK'}.`],
         ['Containment Proof', `Evidence ID ${evidence?.evidence_id || '--'}. Containment confidence ${score}%. Status ${evidence?.status || 'Awaiting response evidence'}.`],
+        ['Shuffle SOAR', `Workflow ${responseResult?.shuffle_result?.workflow || soarResult?.workflow || '--'} | Execution ${responseResult?.shuffle_result?.execution_id || soarResult?.execution_id || '--'} | Payload hash ${responseResult?.shuffle_result?.payload_hash || soarResult?.payload_hash || '--'}.`],
         ['Integrity', evidenceHash ? `SHA256:${evidenceHash}` : 'SHA256 pending evidence payload generation.'],
         ['FortiAnalyzer Evidence Layer', fortiAnalyzerEvidenceRef(payload, faEvidence, sourceIp)],
+        ['ML Risk', mlRisk?.risk_score ? `Score ${mlRisk.risk_score} (${mlRisk.risk_band || mlRisk.band || '--'}). Recommended action ${mlRisk.recommended_action || '--'}. Explanation: ${(mlRisk.explanation || []).join(' ') || 'Deterministic score attached to response.'}` : 'No deterministic risk score is attached to this evidence pack yet.'],
         ['Compliance Evidence', 'Technical evidence is available for analyst review and auditor handoff. This is not automatic certification.'],
         ['Next Steps', 'Validate traffic-path enforcement, review related alerts, update the case owner and attach Evidence Pack to the customer workspace.'],
       ];
@@ -601,6 +615,16 @@
           group: containmentGroupName(evidence) || 'not available',
           policy: containmentPolicyName(evidence) || 'not available',
         },
+        ioc_enrichment: enrichmentResult || {status: 'not_executed'},
+        response_direction: String(containmentGroupName(evidence)).includes('EGRESS') ? 'destination_block' : evidence ? 'source_block' : 'not_executed',
+        fortigate_enforcement: {
+          action: responseResult?.fortigate_action || responseResult?.fortigate_result?.action || responseResult?.fortigate_action || (String(containmentGroupName(evidence)).includes('EGRESS') ? 'destination_block' : 'source_block'),
+          object: containmentObjectName(evidence) || 'not available',
+          group: containmentGroupName(evidence) || 'not available',
+          policy: containmentPolicyName(evidence) || 'not available',
+          status: evidence?.status || 'not executed',
+          enforcement_path: evidence?.enforcement_path || responseResult?.enforcement_path || 'Policy applied. Runtime enforcement depends on traffic path validation.',
+        },
         containment_confidence: `${containmentChecks(evidence).filter(item => item.ok).length}/${containmentChecks(evidence).length}`,
         response_actions: actions.map(sanitizeOperationalObject),
         recommendation: recommendation ? {
@@ -620,6 +644,7 @@
           execution_id: responseResult?.shuffle_result?.execution_id || soarResult?.execution_id || '',
           payload_hash: responseResult?.shuffle_result?.payload_hash || soarResult?.payload_hash || '',
         },
+        ml_risk: responseResult?.ml_risk || mlScore || {status: 'not_scored', model_type: 'deterministic_scoring_v1'},
         ml_candidate_features: {
           severity: candidate?.priority || candidate?.severity || 'not available',
           alert_count: payload?.wazuh?.total || evidence?.alert_count || 0,
@@ -1150,6 +1175,7 @@
         title: caseTitle(incident),
         severity: incident.priority || incident.severity || 'medium',
         source_ip: caseIp(incident) || evidence.ip || '',
+        destination_ip: caseDestinationIp(incident) || evidence.destination_ip || '',
         target: caseTarget(incident),
         mitre: caseMitre(incident),
         wazuh_rule: incident.rule_id || incident.wazuh_rule || evidence.wazuh_rule || '',
@@ -1159,20 +1185,22 @@
         containment_confidence: `${containmentChecks(lastEvidence).filter(item => item.ok).length}/${containmentChecks(lastEvidence).length}`,
         repeated_source_count: enrichmentResult?.repeated_source_count || 0,
         previous_blocks: enrichmentResult?.previous_blocks || 0,
+        previously_destination_blocked: enrichmentResult?.previously_destination_blocked || false,
       };
     }
 
     async function enrichIoc() {
       const base = responsePayloadBase();
-      if (!base.source_ip) {
-        toast.pushToast({tone: 'warn', title: 'IOC enrichment unavailable', message: 'No source IP is selected.'});
+      const ioc = base.destination_ip || base.source_ip;
+      if (!ioc) {
+        toast.pushToast({tone: 'warn', title: 'IOC enrichment unavailable', message: 'No IP indicator is selected.'});
         return;
       }
       setActionState('enrich:ioc');
       try {
-        const result = await api.incidents.enrichIoc({source_ip: base.source_ip, incident_id: base.incident_id});
+        const result = await api.incidents.enrichIoc({ip: ioc, source_ip: base.source_ip, destination_ip: base.destination_ip, incident_id: base.incident_id, context: base});
         setEnrichmentResult(result);
-        toast.pushToast({tone: 'success', title: 'IOC enriched', message: `Recommended action: ${result.recommended_action}`});
+        toast.pushToast({tone: 'success', title: 'IOC enriched', message: `${result.ip_type || 'indicator'} | ${result.recommended_action || 'monitor'}`});
       } catch (err) {
         toast.pushToast({tone: 'error', title: 'IOC enrichment failed', message: err.message});
       } finally {
@@ -1224,6 +1252,50 @@
       }
     }
 
+    async function executeDirectFortiGateAction(direction) {
+      const base = responsePayloadBase();
+      const targetIp = direction === 'destination' ? (base.destination_ip || base.source_ip) : base.source_ip;
+      if (!targetIp) {
+        toast.pushToast({tone: 'warn', title: 'FortiGate action unavailable', message: 'No IP indicator is selected for this response.'});
+        return;
+      }
+      if (analystReason.trim().length < 10 || !approvalConfirmed) {
+        toast.pushToast({tone: 'warn', title: 'Approval required', message: 'Confirm approval and enter an analyst reason with at least 10 characters.'});
+        return;
+      }
+      const actionKey = direction === 'destination' ? 'destination:block' : 'source:block';
+      setActionState(actionKey);
+      try {
+        const requestPayload = {
+          ...base,
+          ip: targetIp,
+          reason: analystReason,
+          analyst_reason: analystReason,
+          source: 'manual',
+          severity: base.severity || 'high',
+          duration_minutes: 60,
+          fortigate_action: direction === 'destination' ? 'destination_block' : 'source_block',
+        };
+        const result = direction === 'destination'
+          ? await api.fortigate.blockDestinationIp(requestPayload)
+          : await api.fortigate.blockIp(requestPayload);
+        setResponseResult(result);
+        setLastEvidence(result);
+        setSoarResult(result.shuffle_result || soarResult);
+        if (result.fortianalyzer) setFortiAnalyzerEvidence(result.fortianalyzer);
+        toast.pushToast({
+          tone: result.status === 'partial_success' ? 'warn' : 'success',
+          title: direction === 'destination' ? 'Destination block applied' : 'Source block applied',
+          message: `${result.object_name || result.fortigate_object || 'FortiGate object'} | evidence ${result.evidence_id || '--'}`,
+        });
+        await load();
+      } catch (err) {
+        toast.pushToast({tone: 'error', title: 'FortiGate response failed', message: err.message});
+      } finally {
+        setActionState('');
+      }
+    }
+
     async function dispatchSoarEvidence() {
       const base = responsePayloadBase();
       setActionState('soar:dispatch');
@@ -1267,9 +1339,11 @@
             h('div', {className: 'fstat'}, h('div', {className: 'fsl'}, 'Risk Score'), h('div', {className: 'fsv'}, recommendation ? recommendation.risk_score : '--'), h('div', {className: 'fss'}, recommendation?.confidence || 'Generate recommendation')),
             h('div', {className: 'fstat'}, h('div', {className: 'fsl'}, 'Automation'), h('div', {className: 'fsv'}, 'Approved'), h('div', {className: 'fss'}, 'Analyst-in-the-loop')),
             h('div', {className: 'fstat'}, h('div', {className: 'fsl'}, 'SOAR'), h('div', {className: 'fsv'}, soarResult?.dispatch_status || soarResult?.status || '--'), h('div', {className: 'fss'}, soarResult?.workflow || 'Shuffle evidence workflow')),
-            h('div', {className: 'fstat'}, h('div', {className: 'fsl'}, 'FortiAnalyzer'), h('div', {className: 'fsv'}, fortiAnalyzerEvidence?.evidence_status || payload.fortianalyzer?.status || '--'), h('div', {className: 'fss'}, `${fortiAnalyzerEvidence?.log_count || 0} logs`))
+            h('div', {className: 'fstat'}, h('div', {className: 'fsl'}, 'FortiAnalyzer'), h('div', {className: 'fsv'}, fortiAnalyzerEvidence?.evidence_status || payload.fortianalyzer?.status || '--'), h('div', {className: 'fss'}, `${fortiAnalyzerEvidence?.log_count || 0} logs`)),
+            h('div', {className: 'fstat'}, h('div', {className: 'fsl'}, 'Egress Blocklist'), h('div', {className: 'fsv'}, fmtNum(destinationBlocklist.length)), h('div', {className: 'fss'}, 'Destination containment entries'))
           ),
           reasons.length ? h('ul', {className: 'reason-list'}, reasons.map(reason => h('li', {key: reason}, reason))) : h('div', {className: 'empty-detail'}, 'Generate a recommendation to see the scoring rationale.'),
+          enrichmentResult ? h('div', {className: 'apirow'}, h('span', {className: 'adot ok'}), h('span', null, 'IOC enrichment'), h('span', {style: {marginLeft: 'auto'}}, `${enrichmentResult.ip || enrichmentResult.source_ip || '--'} | ${enrichmentResult.recommended_action || '--'}`)) : null,
           h('div', {className: 'form-stack', style: {marginTop: 12}},
             h('label', null, 'Response action'),
             h('select', {className: 'form-input', value: responseAction, onChange: event => setResponseAction(event.target.value)}, ['monitor', 'quarantine', 'block'].map(value => h('option', {key: value, value}, value[0].toUpperCase() + value.slice(1)))),
@@ -1278,9 +1352,15 @@
             h('label', {className: 'checkline'}, h('input', {type: 'checkbox', checked: approvalConfirmed, onChange: event => setApprovalConfirmed(event.target.checked)}), ' Approval confirmed by analyst')
           ),
           responseResult ? h('div', {className: 'apirow'}, h('span', {className: 'adot ok'}), h('span', null, 'Last response'), h('span', {style: {marginLeft: 'auto'}}, `${responseResult.status} | evidence ${responseResult.evidence_id || '--'}`)) : null,
+          responseResult ? h('div', {className: 'apirow'}, h('span', {className: 'adot ok'}), h('span', null, 'FortiGate result'), h('span', {style: {marginLeft: 'auto'}}, `${responseResult.object_name || responseResult.fortigate_result?.object || '--'} | ${responseResult.group_name || responseResult.fortigate_result?.group || '--'} | ${responseResult.policy_name || responseResult.fortigate_result?.policy || '--'}`)) : null,
+          responseResult?.ml_risk ? h('div', {className: 'apirow'}, h('span', {className: 'adot ok'}), h('span', null, 'ML Risk'), h('span', {style: {marginLeft: 'auto'}}, `${responseResult.ml_risk.risk_score || responseResult.ml_risk.score || '--'} | ${responseResult.ml_risk.risk_band || responseResult.ml_risk.band || '--'}`)) : null,
+          soarResult?.execution_id ? h('div', {className: 'apirow'}, h('span', {className: 'adot ok'}), h('span', null, 'Shuffle execution'), h('span', {className: 'mono', style: {marginLeft: 'auto'}}, soarResult.execution_id)) : null,
+          h('div', {className: 'empty-detail'}, 'Source Block blocks traffic coming from a malicious IP. Destination Block prevents protected endpoints from reaching a malicious external IP.'),
           h('div', {className: 'row-actions', style: {marginTop: 12}},
             h('button', {className: 'btn', onClick: enrichIoc, disabled: actionState === 'enrich:ioc'}, actionState === 'enrich:ioc' ? 'Enriching...' : 'Enrich IOC'),
             h('button', {className: 'btn', onClick: generateRecommendation, disabled: actionState === 'recommendation'}, actionState === 'recommendation' ? 'Scoring...' : 'Generate Recommendation'),
+            h('button', {className: 'btn', onClick: () => executeDirectFortiGateAction('source'), disabled: actionState === 'source:block'}, actionState === 'source:block' ? 'Blocking Source...' : 'Source Block'),
+            h('button', {className: 'btn', onClick: () => executeDirectFortiGateAction('destination'), disabled: actionState === 'destination:block'}, actionState === 'destination:block' ? 'Blocking Destination...' : 'Destination Block'),
             h('button', {className: 'btn btnp', onClick: executeRecommendedResponse, disabled: actionState === 'execute:response'}, actionState === 'execute:response' ? 'Executing...' : 'Execute Recommended Response'),
             h('button', {className: 'btn', onClick: dispatchSoarEvidence, disabled: actionState === 'soar:dispatch'}, 'Dispatch SOAR Evidence'),
             h('button', {className: 'btn', onClick: notifyAnalyst, disabled: actionState === 'soar:notify'}, 'Notify Analyst')

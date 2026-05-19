@@ -72,6 +72,16 @@ def _quarantine_config() -> dict:
     }
 
 
+def _destination_block_config() -> dict:
+    return {
+        "group_name": getattr(config, "FORTIGATE_DESTINATION_BLOCK_GROUP", "SPARK_EGRESS_BLOCKLIST"),
+        "policy_name": getattr(config, "FORTIGATE_DESTINATION_BLOCK_POLICY", "SPARK_EGRESS_AUTO_BLOCK"),
+        "srcaddr_name": getattr(config, "FORTIGATE_DESTINATION_BLOCK_SRCADDR", "all") or "all",
+        "srcintf": getattr(config, "FORTIGATE_DESTINATION_BLOCK_SRCINTF", getattr(config, "FORTIGATE_BLOCK_SRCINTF", "any")),
+        "dstintf": getattr(config, "FORTIGATE_DESTINATION_BLOCK_DSTINTF", getattr(config, "FORTIGATE_BLOCK_DSTINTF", "any")),
+    }
+
+
 def _fortianalyzer_config() -> tuple[str, str]:
     return (
         getattr(config, "FORTIANALYZER_BASE_URL", "") or "",
@@ -1611,48 +1621,6 @@ def fortigate_quarantine_ip():
         quarantine_cfg["srcintf"],
         quarantine_cfg["dstintf"],
     )
-
-
-@spark_bp.route("/spark/ml/status")
-def ml_status():
-    try:
-        return jsonify(ml_scoring.get_status())
-    except Exception as exc:
-        return jsonify({"ready": False, "engine": "deterministic_scoring_v1", "model_type": "deterministic", "trained_model": False, "tables_ready": False, "event_count": 0, "score_count": 0, "status": "unavailable", "message": str(exc)})
-
-
-@spark_bp.route("/spark/ml/score-incident", methods=["POST"])
-def ml_score_incident():
-    payload = request.get_json() or {}
-    payload = _with_fortianalyzer_evidence(payload, force=bool(payload.get("include_fortianalyzer")))
-    score = ml_scoring.score_incident(payload)
-    persisted = ml_scoring.persist_score(score)
-    return jsonify(persisted), 201
-
-
-@spark_bp.route("/spark/ml/insights")
-def ml_insights():
-    try:
-        limit = min(100, max(1, int(request.args.get("limit", 25) or 25)))
-    except (TypeError, ValueError):
-        limit = 25
-    data = ml_scoring.get_insights(limit=limit)
-    try:
-        recent_cases = ticket_store.list_incident_cases(limit=10, include_closed=False, sort="recent")
-        data["live_candidates"] = [ml_scoring.score_incident({"case": case}) for case in recent_cases[:5]]
-    except Exception:
-        data["live_candidates"] = []
-    return jsonify(data)
-
-
-@spark_bp.route("/spark/ml/export")
-def ml_export():
-    fmt = (request.args.get("format") or "json").lower()
-    if fmt not in {"json", "csv"}:
-        return jsonify({"error": "format must be json or csv"}), 400
-    body, mimetype = ml_scoring.export_dataset(fmt)
-    extension = "csv" if fmt == "csv" else "json"
-    return Response(body, mimetype=mimetype, headers={"Content-Disposition": f"attachment; filename=spark-ml-dataset.{extension}"})
     evidence_payload = {
         **fg_result,
         "action": "quarantine",
@@ -1698,6 +1666,48 @@ def ml_export():
     }), status_code
 
 
+@spark_bp.route("/spark/ml/status")
+def ml_status():
+    try:
+        return jsonify(ml_scoring.get_status())
+    except Exception as exc:
+        return jsonify({"ready": False, "engine": "deterministic_scoring_v1", "model_type": "deterministic", "trained_model": False, "tables_ready": False, "event_count": 0, "score_count": 0, "status": "unavailable", "message": str(exc)})
+
+
+@spark_bp.route("/spark/ml/score-incident", methods=["POST"])
+def ml_score_incident():
+    payload = request.get_json() or {}
+    payload = _with_fortianalyzer_evidence(payload, force=bool(payload.get("include_fortianalyzer")))
+    score = ml_scoring.score_incident(payload)
+    persisted = ml_scoring.persist_score(score)
+    return jsonify(persisted), 201
+
+
+@spark_bp.route("/spark/ml/insights")
+def ml_insights():
+    try:
+        limit = min(100, max(1, int(request.args.get("limit", 25) or 25)))
+    except (TypeError, ValueError):
+        limit = 25
+    data = ml_scoring.get_insights(limit=limit)
+    try:
+        recent_cases = ticket_store.list_incident_cases(limit=10, include_closed=False, sort="recent")
+        data["live_candidates"] = [ml_scoring.score_incident({"case": case}) for case in recent_cases[:5]]
+    except Exception:
+        data["live_candidates"] = []
+    return jsonify(data)
+
+
+@spark_bp.route("/spark/ml/export")
+def ml_export():
+    fmt = (request.args.get("format") or "json").lower()
+    if fmt not in {"json", "csv"}:
+        return jsonify({"error": "format must be json or csv"}), 400
+    body, mimetype = ml_scoring.export_dataset(fmt)
+    extension = "csv" if fmt == "csv" else "json"
+    return Response(body, mimetype=mimetype, headers={"Content-Disposition": f"attachment; filename=spark-ml-dataset.{extension}"})
+
+
 @spark_bp.route("/spark/fortigate/unquarantine-ip", methods=["POST"])
 def fortigate_unquarantine_ip():
     data = request.get_json() or {}
@@ -1727,6 +1737,204 @@ def fortigate_quarantine_list():
         fg_result = fortigate.list_quarantine(config.FORTIGATE_BASE_URL, config.FORTIGATE_API_KEY, quarantine_cfg["group_name"])
     except Exception as exc:
         return jsonify({"status": "endpoint_error", "message": str(exc), "items": []}), 502
+    return jsonify(_decorate_list_with_events(fg_result))
+
+
+def _status_code_for_fortigate(result: dict) -> int:
+    status = result.get("status")
+    if result.get("ok") or status == "partial_success":
+        return 200
+    if status in {"not_configured", "fortigate_offline"}:
+        return 503
+    if status == "auth_failed":
+        return 401
+    if status == "timeout":
+        return 504
+    return 502
+
+
+def _decorate_response_side_effects(data: dict, ip: str, incident_id: str, action_taken: str, evidence_id: str, fg_result: dict) -> dict:
+    fortianalyzer_result = {"status": "not_queried", "evidence_status": "not_queried", "log_count": 0, "references": []}
+    ml_score = {"status": "not_scored", "model_type": "deterministic_scoring_v1"}
+    shuffle_result = {"status": "skipped", "webhook_called": False, "message": "Shuffle dispatch skipped because the FortiGate action did not succeed."}
+
+    try:
+        fortianalyzer_result = _fortianalyzer_evidence_for_score(ip)
+    except Exception as exc:
+        fortianalyzer_result = {"status": "evidence_pending", "evidence_status": "evidence_pending", "log_count": 0, "references": [], "message": "FortiAnalyzer lookup unavailable.", "error": str(exc)}
+
+    try:
+        ml_payload = {
+            "incident": {
+                **data,
+                "source_ip": data.get("source_ip") or ip,
+                "destination_ip": data.get("destination_ip") or (ip if action_taken == "fortigate_block_destination_ip" else ""),
+                "incident_id": incident_id,
+                "action_taken": action_taken,
+                "action_success": bool(fg_result.get("ok")),
+                "containment_status": fg_result.get("status", action_taken),
+                "evidence_id": evidence_id,
+                "fortigate_object": fg_result.get("object", ""),
+                "fortigate_group": fg_result.get("group", ""),
+                "fortigate_policy": fg_result.get("policy", ""),
+                "fortianalyzer": fortianalyzer_result,
+            }
+        }
+        ml_score = _score_and_persist_safe(ml_payload)
+    except Exception as exc:
+        ml_score = {"status": "ml_score_failed", "error": str(exc), "model_type": "deterministic_scoring_v1"}
+
+    if getattr(config, "SHUFFLE_INCIDENT_WEBHOOK_URL", ""):
+        try:
+            soar_payload = {
+                **data,
+                "incident_id": incident_id,
+                "source_ip": data.get("source_ip") or (ip if action_taken != "fortigate_block_destination_ip" else ""),
+                "destination_ip": data.get("destination_ip") or (ip if action_taken == "fortigate_block_destination_ip" else ""),
+                "recommended_action": action_taken.replace("fortigate_", ""),
+                "action_taken": action_taken,
+                "fortigate_object": fg_result.get("object", ""),
+                "fortigate_group": fg_result.get("group", ""),
+                "fortigate_policy": fg_result.get("policy", ""),
+                "fortianalyzer_status": fortianalyzer_result.get("status") or fortianalyzer_result.get("evidence_status", ""),
+                "fortianalyzer_log_count": fortianalyzer_result.get("log_count", 0),
+                "evidence_id": evidence_id,
+                "analyst_reason": data.get("analyst_reason") or data.get("reason", ""),
+                "risk_score": ml_score.get("risk_score") or ml_score.get("score") or 0,
+                "containment_confidence": data.get("containment_confidence", ""),
+            }
+            shuffle_result, _ = _soar_dispatch(soar_payload, workflow=getattr(config, "SHUFFLE_INCIDENT_WORKFLOW", "SPARK - Incident Response Evidence"))
+        except Exception as exc:
+            shuffle_result = {"status": "failed", "webhook_called": False, "message": "SOAR evidence dispatch unavailable.", "error": str(exc)}
+
+    return {
+        "fortianalyzer": fortianalyzer_result,
+        "ml_risk": ml_score,
+        "shuffle_result": shuffle_result,
+    }
+
+
+@spark_bp.route("/spark/fortigate/block-destination-ip", methods=["POST"])
+def fortigate_block_destination_ip():
+    data = request.get_json() or {}
+    ip, error = _validate_block_ip(data.get("ip") or data.get("destination_ip", ""))
+    if error:
+        payload, status_code = error
+        return jsonify(payload), status_code
+    reason = (data.get("reason") or data.get("analyst_reason") or "").strip()
+    if len(reason) < 10:
+        return jsonify({"status": "invalid_reason", "message": "Analyst reason must have at least 10 characters.", "ip": ip}), 400
+
+    cfg = _destination_block_config()
+    incident_id = (data.get("incident_id") or data.get("case_id") or data.get("caseId") or "").strip()
+    ticket_id = (data.get("ticket_id") or data.get("ticketId") or "").strip()
+    source = (data.get("source") or "manual").strip().lower()
+    severity = (data.get("severity") or "high").strip().lower()
+    try:
+        duration_minutes = int(data.get("duration_minutes", 60))
+    except (TypeError, ValueError):
+        duration_minutes = 60
+
+    fg_result = fortigate.block_destination_ip(
+        config.FORTIGATE_BASE_URL,
+        config.FORTIGATE_API_KEY,
+        ip,
+        reason,
+        source,
+        duration_minutes,
+        severity,
+        incident_id,
+        cfg["group_name"],
+        cfg["policy_name"],
+        cfg["srcaddr_name"],
+        cfg["srcintf"],
+        cfg["dstintf"],
+    )
+    evidence_payload = {
+        **fg_result,
+        "action": "destination_block",
+        "reason": reason,
+        "source": source,
+        "severity": severity,
+        "incident_id": incident_id,
+        "duration_minutes": duration_minutes,
+        "fortigate_object": fg_result.get("object", ""),
+        "fortigate_group": cfg["group_name"],
+        "fortigate_policy": cfg["policy_name"],
+        "enforcement_path": fg_result.get("enforcement_path", ""),
+        "api_responses": fg_result.get("api_responses", {}),
+    }
+    event = _record_fortigate_evidence(
+        "fortigate_block_destination_ip",
+        "success" if fg_result.get("ok") else "failed",
+        evidence_payload,
+        case_id=incident_id,
+        ticket_id=ticket_id,
+    )
+    evidence_id = event.get("id") or event.get("created_at", "")
+    side_effects = _decorate_response_side_effects(data, ip, incident_id, "fortigate_block_destination_ip", evidence_id, fg_result) if fg_result.get("ok") else {}
+
+    return jsonify({
+        "status": fg_result.get("status", "destination_block_failed"),
+        "action": "destination_block",
+        "fortigate_action": "destination_block",
+        "ip": ip,
+        "reason": reason,
+        "object_name": fg_result.get("object", ""),
+        "group_name": cfg["group_name"],
+        "policy_name": cfg["policy_name"],
+        "fortigate_object": fg_result.get("object", ""),
+        "fortigate_group": cfg["group_name"],
+        "fortigate_policy": cfg["policy_name"],
+        "policy_present": bool(fg_result.get("policy_present")),
+        "evidence_id": evidence_id,
+        "ml_risk": side_effects.get("ml_risk", {"status": "not_scored"}),
+        "fortianalyzer": side_effects.get("fortianalyzer", {"status": "not_queried", "log_count": 0}),
+        "shuffle_result": side_effects.get("shuffle_result", {"status": "skipped", "webhook_called": False}),
+        "enforcement_path": fg_result.get("enforcement_path", "Policy applied. Runtime enforcement depends on traffic path validation."),
+        "fortigate": {
+            "object_created_or_updated": bool(fg_result.get("object_created_or_updated")),
+            "group_updated": bool(fg_result.get("group_updated") or fg_result.get("already_member")),
+            "policy_present": bool(fg_result.get("policy_present")),
+            "policy_created": bool(fg_result.get("policy_created")),
+            "policy_limit_or_creation_failed": fg_result.get("reason") == "policy_limit_or_creation_failed",
+        },
+        "message": fg_result.get("message", ""),
+        "evidence": event,
+    }), _status_code_for_fortigate(fg_result)
+
+
+@spark_bp.route("/spark/fortigate/unblock-destination-ip", methods=["POST"])
+def fortigate_unblock_destination_ip():
+    data = request.get_json() or {}
+    ip, error = _validate_block_ip(data.get("ip") or data.get("destination_ip", ""))
+    if error:
+        payload, status_code = error
+        return jsonify(payload), status_code
+    reason = (data.get("reason") or data.get("analyst_reason") or "").strip()
+    if len(reason) < 10:
+        return jsonify({"status": "invalid_reason", "message": "Analyst reason must have at least 10 characters.", "ip": ip}), 400
+    cfg = _destination_block_config()
+    incident_id = (data.get("incident_id") or data.get("case_id") or data.get("caseId") or "").strip()
+    fg_result = fortigate.unblock_destination_ip(config.FORTIGATE_BASE_URL, config.FORTIGATE_API_KEY, ip, cfg["group_name"], delete_object=True)
+    event = _record_fortigate_evidence(
+        "fortigate_unblock_destination_ip",
+        "success" if fg_result.get("ok") else "failed",
+        {**fg_result, "action": "destination_unblock", "reason": reason, "incident_id": incident_id, "fortigate_group": cfg["group_name"], "fortigate_policy": cfg["policy_name"]},
+        case_id=incident_id,
+    )
+    return jsonify({"status": fg_result.get("status", "destination_unblock_failed"), "ip": ip, "reason": reason, "object_name": fg_result.get("object", ""), "group_name": cfg["group_name"], "policy_name": cfg["policy_name"], "evidence_id": event.get("id"), "fortigate": fg_result, "evidence": event}), _status_code_for_fortigate(fg_result)
+
+
+@spark_bp.route("/spark/fortigate/destination-blocklist")
+def fortigate_destination_blocklist():
+    cfg = _destination_block_config()
+    try:
+        fg_result = fortigate.list_destination_blocklist(config.FORTIGATE_BASE_URL, config.FORTIGATE_API_KEY, cfg["group_name"])
+    except Exception as exc:
+        status = "not_configured" if "not configured" in str(exc).lower() else "endpoint_error"
+        code = 200 if status == "not_configured" else 502
+        return jsonify({"status": status, "message": "FortiGate destination blocklist connector is ready for configuration." if status == "not_configured" else str(exc), "items": []}), code
     return jsonify(_decorate_list_with_events(fg_result))
 
 
@@ -1880,46 +2088,102 @@ def action_events():
     return jsonify(ticket_store.list_action_events(limit=limit, case_id=case_id, ticket_id=ticket_id))
 
 
-def _local_ioc_enrichment(source_ip: str, incident_id: str = "") -> dict:
+def _local_ioc_enrichment(source_ip: str, incident_id: str = "", context: dict | None = None) -> dict:
+    context = context or {}
     source_ip = (source_ip or "").strip()
     try:
         parsed = ipaddress.ip_address(source_ip)
         private_ip = parsed.is_private
+        if parsed.is_private:
+            ip_type = "private"
+        elif parsed.is_loopback or parsed.is_link_local or parsed.is_multicast or parsed.is_reserved or parsed.is_unspecified:
+            ip_type = "reserved"
+        else:
+            ip_type = "public"
     except ValueError:
         parsed = None
         private_ip = False
+        ip_type = "invalid"
     events = ticket_store.list_action_events(limit=1000)
-    repeated = previous_blocks = previous_quarantine = 0
+    repeated_source = repeated_destination = previous_blocks = previous_destination_blocks = previous_quarantine = 0
     for event in events:
         payload = event.get("payload", {})
         if (payload.get("ip") or event.get("ip")) != source_ip:
             continue
-        repeated += 1
         action = str(event.get("action") or payload.get("action") or "").lower()
-        previous_blocks += 1 if "block" in action else 0
+        is_destination = "destination" in action or payload.get("action") == "destination_block"
+        if is_destination:
+            repeated_destination += 1
+            previous_destination_blocks += 1 if "block" in action else 0
+        else:
+            repeated_source += 1
+            previous_blocks += 1 if "block" in action else 0
         previous_quarantine += 1 if "quarantine" in action else 0
     allowlist = {item.strip() for item in str(getattr(config, "SPARK_ALLOWLIST_IPS", "")).split(",") if item.strip()}
     allowlisted = source_ip in allowlist
-    if allowlisted or source_ip in PROTECTED_BLOCK_IPS or (parsed and (parsed.is_loopback or parsed.is_unspecified)):
+    severity = str(context.get("severity") or "").lower()
+    alert_count = int(context.get("alert_count") or 0) if str(context.get("alert_count") or "").isdigit() else 0
+    text_context = " ".join(str(context.get(key, "")) for key in ("title", "mitre", "description", "context", "recommended_action")).lower()
+    reasons = []
+    if ip_type == "invalid":
         recommended = "monitor"
-    elif previous_blocks or repeated >= 3:
-        recommended = "block"
-    elif previous_quarantine or repeated:
+        direction = "monitor"
+        reasons.append("Invalid IP address supplied.")
+    elif allowlisted or source_ip in PROTECTED_BLOCK_IPS or ip_type == "reserved":
+        recommended = "monitor"
+        direction = "monitor"
+        reasons.append("IP is allowlisted, reserved, or belongs to protected control-plane scope.")
+    elif ip_type == "public" and any(term in text_context for term in ("c2", "phishing", "malicious destination", "egress", "destination", "threat intel", "threat-intel")):
+        recommended = "destination_block"
+        direction = "destination_block"
+        reasons.append("Public IOC appears in destination/threat-intel context; egress containment is preferred.")
+    elif ip_type == "public" and severity in {"high", "critical"} and alert_count >= 10:
+        recommended = "destination_block"
+        direction = "destination_block"
+        reasons.append("High severity with repeated alerts against a public IOC supports destination containment.")
+    elif previous_destination_blocks:
+        recommended = "destination_block"
+        direction = "destination_block"
+        reasons.append("IOC was previously added to the egress blocklist.")
+    elif previous_blocks or repeated_source >= 3:
+        recommended = "source_block"
+        direction = "source_block"
+        reasons.append("Repeated source activity was observed in local action evidence.")
+    elif private_ip and any(term in text_context for term in ("brute force", "inbound", "source", "lateral")):
+        recommended = "source_block" if severity in {"high", "critical"} else "quarantine"
+        direction = "source_block" if recommended == "source_block" else "monitor"
+        reasons.append("Private IOC appears in inbound/source response context and requires analyst review.")
+    elif previous_quarantine or repeated_source:
         recommended = "quarantine"
+        direction = "monitor"
+        reasons.append("Local evidence shows prior related activity, but containment confidence is incomplete.")
     else:
         recommended = "monitor"
+        direction = "monitor"
+        reasons.append("No confirmed local reputation or containment history is available.")
     return {
+        "ip": source_ip,
         "source_ip": source_ip,
         "incident_id": incident_id,
+        "ip_type": ip_type,
         "private_ip": private_ip,
-        "repeated_source_count": repeated,
+        "direction_recommendation": direction,
+        "repeated_source_count": repeated_source,
+        "repeated_destination_count": repeated_destination,
         "previously_blocked": previous_blocks > 0,
+        "previously_destination_blocked": previous_destination_blocks > 0,
         "previous_blocks": previous_blocks,
         "previously_quarantined": previous_quarantine > 0,
         "allowlisted": allowlisted,
         "recommended_action": recommended,
+        "reasons": reasons,
         "enrichment_source": "local",
         "external_enrichment_ready": bool(getattr(config, "ABUSEIPDB_API_KEY", "") or getattr(config, "OTX_API_KEY", "")),
+        "reputation_score": None,
+        "abuse_confidence": None,
+        "threat_intel_source": None,
+        "asn": None,
+        "country": None,
         "external": {},
     }
 
@@ -1964,11 +2228,27 @@ def soar_dispatch_evidence():
 @spark_bp.route("/spark/soar/notify-analyst", methods=["POST"])
 def soar_notify_analyst():
     data = request.get_json() or {}
-    notification = {"type": "analyst_notification", "title": data.get("title") or "SPARK SOC incident requires analyst review", "severity": data.get("severity", "requires review"), "source_ip": data.get("source_ip", ""), "target": data.get("target", ""), "recommended_action": data.get("recommended_action", "monitor"), "risk_score": data.get("risk_score", ""), "evidence_id": data.get("evidence_id", ""), "dashboard_link": _dashboard_link(), "message": f"{data.get('severity', 'Review').upper()} - {data.get('title', 'Incident')} | Source {data.get('source_ip', '--')} | Action {data.get('recommended_action', 'monitor')} | Evidence {data.get('evidence_id', '--')}"}
+    notification = {
+        "type": "analyst_notification",
+        "incident_id": data.get("incident_id", ""),
+        "title": data.get("title") or "SPARK SOC incident requires analyst review",
+        "severity": data.get("severity", "requires review"),
+        "risk_score": data.get("risk_score", ""),
+        "recommended_action": data.get("recommended_action", "monitor"),
+        "source_ip": data.get("source_ip", ""),
+        "destination_ip": data.get("destination_ip", ""),
+        "target": data.get("target", ""),
+        "evidence_id": data.get("evidence_id", ""),
+        "fortigate_action": data.get("fortigate_action") or data.get("action_taken") or "",
+        "fortianalyzer_status": data.get("fortianalyzer_status", ""),
+        "dashboard_link": data.get("dashboard_link") or _dashboard_link(),
+        "message": f"{data.get('severity', 'Review').upper()} - {data.get('title', 'Incident')} | Source {data.get('source_ip', '--')} | Destination {data.get('destination_ip', '--')} | Action {data.get('recommended_action', 'monitor')} | Evidence {data.get('evidence_id', '--')}",
+    }
     try:
         result, event = _soar_dispatch(notification, workflow="SPARK - Notify Analyst", webhook_url=_notification_webhook())
-        status = "sent" if result.get("ok") else result.get("status", "connector_ready")
-        return jsonify({**result, "status": status, "notification": notification, "action_log_id": event.get("id")})
+        raw_status = result.get("status", "connector_ready")
+        status = "sent" if result.get("ok") else raw_status if raw_status in {"connector_ready", "auth_required", "auth_failed"} else "failed"
+        return jsonify({**result, "status": status, "webhook_called": bool(result.get("webhook_called")), "execution_id": result.get("execution_id", ""), "message": result.get("message", ""), "payload_hash": result.get("payload_hash", ""), "notification": notification, "action_log_id": event.get("id")})
     except Exception as exc:
         return jsonify({"status": "failed", "message": "Analyst notification unavailable.", "error": f"{type(exc).__name__}: {exc}"}), 200
 
@@ -1976,14 +2256,15 @@ def soar_notify_analyst():
 @spark_bp.route("/spark/soar/enrich-ioc", methods=["POST"])
 def soar_enrich_ioc():
     data = request.get_json() or {}
-    return jsonify(_local_ioc_enrichment(data.get("source_ip", ""), data.get("incident_id", "")))
+    ip = data.get("ip") or data.get("source_ip") or data.get("destination_ip") or ""
+    return jsonify(_local_ioc_enrichment(ip, data.get("incident_id", ""), data.get("context") if isinstance(data.get("context"), dict) else data))
 
 
 @spark_bp.route("/spark/response/recommendation", methods=["GET", "POST"])
 def response_recommendation():
     data = request.get_json(silent=True) or request.args.to_dict()
     source_ip = data.get("source_ip", "")
-    enrichment = _local_ioc_enrichment(source_ip, data.get("incident_id", "")) if source_ip else {}
+    enrichment = _local_ioc_enrichment(source_ip, data.get("incident_id", ""), data) if source_ip else {}
     recommendation = response_engine.recommend({**data, **enrichment})
     return jsonify({"status": "success", "recommendation": recommendation, "enrichment": enrichment})
 
@@ -2007,7 +2288,7 @@ def response_execute():
             return jsonify(payload), status_code
         ip = valid_ip
     incident_id = data.get("incident_id", "")
-    enrichment = _local_ioc_enrichment(ip, incident_id) if ip else {}
+    enrichment = _local_ioc_enrichment(ip, incident_id, data) if ip else {}
     recommendation = response_engine.recommend({**data, **enrichment, "source_ip": ip})
     fortigate_result = {"status": "not_required", "message": "Monitor action recorded; no FortiGate change executed.", "ok": True}
     if action == "quarantine":

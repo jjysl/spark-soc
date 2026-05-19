@@ -17,6 +17,8 @@ DEFAULT_BLOCKLIST_GROUP = "SPARK_BLOCKLIST"
 DEFAULT_BLOCKLIST_POLICY = "SPARK_AUTO_BLOCK"
 DEFAULT_QUARANTINE_GROUP = "SPARK_QUARANTINE_LIST"
 DEFAULT_QUARANTINE_POLICY = "SPARK_QUARANTINE_REVIEW"
+DEFAULT_DESTINATION_BLOCK_GROUP = "SPARK_EGRESS_BLOCKLIST"
+DEFAULT_DESTINATION_BLOCK_POLICY = "SPARK_EGRESS_AUTO_BLOCK"
 
 
 def _not_configured() -> dict:
@@ -36,6 +38,8 @@ def _error_state(exc: Exception, endpoint: str) -> dict:
     status = "endpoint_error"
     if isinstance(exc, (request_exceptions.Timeout, request_exceptions.ConnectTimeout, request_exceptions.ReadTimeout)):
         status = "timeout"
+    elif isinstance(exc, ValueError) and "not configured" in str(exc).lower():
+        status = "not_configured"
     elif isinstance(exc, (ValueError, request_exceptions.JSONDecodeError)):
         status = "parse_error"
     elif isinstance(exc, requests.HTTPError):
@@ -165,6 +169,10 @@ def block_object_name(ip: str) -> str:
 
 def quarantine_object_name(ip: str) -> str:
     return _object_name_for_ip(ip, "SPARK_QUARANTINE")
+
+
+def destination_block_object_name(ip: str) -> str:
+    return _object_name_for_ip(ip, "SPARK_DST_BLOCK")
 
 
 def _member_names(items) -> list[str]:
@@ -342,13 +350,15 @@ def get_firewall_policy_by_name(base_url: str, api_key: str, policy_name: str) -
     return None
 
 
-def ensure_block_policy(
+def ensure_deny_policy(
     base_url: str,
     api_key: str,
-    group_name: str = DEFAULT_BLOCKLIST_GROUP,
+    srcaddr_name: str,
+    dstaddr_name: str,
     policy_name: str = DEFAULT_BLOCKLIST_POLICY,
     srcintf: str = "any",
     dstintf: str = "any",
+    comments: str = "SPARK SOC automated containment policy",
 ) -> dict:
     existing = get_firewall_policy_by_name(base_url, api_key, policy_name)
     if existing:
@@ -363,14 +373,15 @@ def ensure_block_policy(
         "name": policy_name,
         "srcintf": [{"name": srcintf}],
         "dstintf": [{"name": dstintf}],
-        "srcaddr": [{"name": group_name}],
-        "dstaddr": [{"name": "all"}],
+        "srcaddr": [{"name": srcaddr_name}],
+        "dstaddr": [{"name": dstaddr_name}],
         "action": "deny",
         "schedule": "always",
         "service": [{"name": "ALL"}],
         "logtraffic": "all",
+        "nat": "disable",
         "status": "enable",
-        "comments": "SPARK SOC automated containment policy",
+        "comments": comments,
     }
     response = _request("POST", base_url, "/api/v2/cmdb/firewall/policy", api_key, json=payload, timeout=8)
     response.raise_for_status()
@@ -382,6 +393,47 @@ def ensure_block_policy(
         "name": policy_name,
         "response": _summarize_response(response),
     }
+
+
+def ensure_block_policy(
+    base_url: str,
+    api_key: str,
+    group_name: str = DEFAULT_BLOCKLIST_GROUP,
+    policy_name: str = DEFAULT_BLOCKLIST_POLICY,
+    srcintf: str = "any",
+    dstintf: str = "any",
+) -> dict:
+    return ensure_deny_policy(
+        base_url,
+        api_key,
+        srcaddr_name=group_name,
+        dstaddr_name="all",
+        policy_name=policy_name,
+        srcintf=srcintf,
+        dstintf=dstintf,
+        comments="SPARK SOC automated source containment policy",
+    )
+
+
+def ensure_destination_block_policy(
+    base_url: str,
+    api_key: str,
+    group_name: str = DEFAULT_DESTINATION_BLOCK_GROUP,
+    policy_name: str = DEFAULT_DESTINATION_BLOCK_POLICY,
+    srcaddr_name: str = "all",
+    srcintf: str = "any",
+    dstintf: str = "any",
+) -> dict:
+    return ensure_deny_policy(
+        base_url,
+        api_key,
+        srcaddr_name=srcaddr_name or "all",
+        dstaddr_name=group_name,
+        policy_name=policy_name,
+        srcintf=srcintf,
+        dstintf=dstintf,
+        comments="SPARK SOC automated destination containment policy",
+    )
 
 
 def ensure_quarantine_policy(
@@ -540,6 +592,8 @@ def block_ip(
     object_prefix: str = "SPARK_BLOCK",
     allow_partial_policy: bool = False,
     action_label: str = "blocked",
+    policy_direction: str = "source",
+    policy_srcaddr_name: str = "all",
 ) -> dict:
     object_name = _object_name_for_ip(ip, object_prefix)
     evidence = {
@@ -616,7 +670,10 @@ def block_ip(
             evidence["api_responses"]["address_group"] = _summarize_response(response)
 
         try:
-            policy = ensure_block_policy(base_url, api_key, group_name, policy_name, srcintf, dstintf)
+            if policy_direction == "destination":
+                policy = ensure_destination_block_policy(base_url, api_key, group_name, policy_name, policy_srcaddr_name, srcintf, dstintf)
+            else:
+                policy = ensure_block_policy(base_url, api_key, group_name, policy_name, srcintf, dstintf)
         except Exception as exc:
             status = _error_state(exc, "/api/v2/cmdb/firewall/policy")
             if allow_partial_policy and (evidence.get("object_created_or_updated") and (evidence.get("group_updated") or evidence.get("already_member"))):
@@ -728,6 +785,52 @@ def quarantine_ip(
     )
 
 
+def block_destination_ip(
+    base_url: str,
+    api_key: str,
+    ip: str,
+    reason: str,
+    source: str,
+    duration_minutes: int | None,
+    severity: str,
+    incident_id: str = "",
+    group_name: str = DEFAULT_DESTINATION_BLOCK_GROUP,
+    policy_name: str = DEFAULT_DESTINATION_BLOCK_POLICY,
+    srcaddr_name: str = "all",
+    srcintf: str = "any",
+    dstintf: str = "any",
+) -> dict:
+    result = block_ip(
+        base_url,
+        api_key,
+        ip,
+        reason,
+        source,
+        duration_minutes,
+        severity,
+        incident_id,
+        group_name,
+        policy_name,
+        srcintf,
+        dstintf,
+        object_prefix="SPARK_DST_BLOCK",
+        allow_partial_policy=True,
+        action_label="destination_blocked",
+        policy_direction="destination",
+        policy_srcaddr_name=srcaddr_name,
+    )
+    result["enforcement_path"] = "FortiGate egress deny policy using SPARK_EGRESS_BLOCKLIST as destination address; runtime enforcement depends on traffic path validation."
+    return result
+
+
+def unblock_destination_ip(base_url: str, api_key: str, ip: str, group_name: str = DEFAULT_DESTINATION_BLOCK_GROUP, delete_object: bool = True) -> dict:
+    result = unblock_ip(base_url, api_key, ip, group_name, delete_object=delete_object, object_prefix="SPARK_DST_BLOCK")
+    if result.get("ok"):
+        result["status"] = "destination_unblocked"
+        result["message"] = "IP removed from FortiGate egress blocklist."
+    return result
+
+
 def unquarantine_ip(base_url: str, api_key: str, ip: str, group_name: str = DEFAULT_QUARANTINE_GROUP, delete_object: bool = True) -> dict:
     result = unblock_ip(base_url, api_key, ip, group_name, delete_object=delete_object, object_prefix="SPARK_QUARANTINE")
     if result.get("ok"):
@@ -779,6 +882,15 @@ def list_quarantine(base_url: str, api_key: str, group_name: str = DEFAULT_QUARA
     result["group_name"] = group_name
     for item in result.get("items", []):
         item["status"] = "quarantined"
+    return result
+
+
+def list_destination_blocklist(base_url: str, api_key: str, group_name: str = DEFAULT_DESTINATION_BLOCK_GROUP) -> dict:
+    result = list_blocklist(base_url, api_key, group_name)
+    result["status"] = "success"
+    result["group_name"] = group_name
+    for item in result.get("items", []):
+        item["status"] = "destination_blocked"
     return result
 
 

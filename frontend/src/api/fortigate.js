@@ -6,5 +6,8 @@
     blockIp: payload => client.post('/spark/fortigate/block-ip', payload),
     unblockIp: payload => client.post('/spark/fortigate/unblock-ip', payload),
     getBlocklist: () => client.get('/spark/fortigate/blocklist'),
+    blockDestinationIp: payload => client.post('/spark/fortigate/block-destination-ip', payload),
+    unblockDestinationIp: payload => client.post('/spark/fortigate/unblock-destination-ip', payload),
+    getDestinationBlocklist: () => client.get('/spark/fortigate/destination-blocklist'),
   };
 })();
