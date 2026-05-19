@@ -15,6 +15,8 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 DEFAULT_BLOCKLIST_GROUP = "SPARK_BLOCKLIST"
 DEFAULT_BLOCKLIST_POLICY = "SPARK_AUTO_BLOCK"
+DEFAULT_QUARANTINE_GROUP = "SPARK_QUARANTINE_LIST"
+DEFAULT_QUARANTINE_POLICY = "SPARK_QUARANTINE_REVIEW"
 
 
 def _not_configured() -> dict:
@@ -153,12 +155,16 @@ def _metric_current(results: dict, key: str) -> int:
     return 0
 
 
-def _object_name_for_ip(ip: str) -> str:
-    return f"SPARK_BLOCK_{ip.replace('.', '_')}"
+def _object_name_for_ip(ip: str, prefix: str = "SPARK_BLOCK") -> str:
+    return f"{prefix}_{ip.replace('.', '_')}"
 
 
 def block_object_name(ip: str) -> str:
     return _object_name_for_ip(ip)
+
+
+def quarantine_object_name(ip: str) -> str:
+    return _object_name_for_ip(ip, "SPARK_QUARANTINE")
 
 
 def _member_names(items) -> list[str]:
@@ -378,6 +384,18 @@ def ensure_block_policy(
     }
 
 
+def ensure_quarantine_policy(
+    base_url: str,
+    api_key: str,
+    group_name: str = DEFAULT_QUARANTINE_GROUP,
+    policy_name: str = DEFAULT_QUARANTINE_POLICY,
+    srcintf: str = "any",
+    dstintf: str = "any",
+) -> dict:
+    """Ensure one reusable review policy for quarantine group traffic."""
+    return ensure_block_policy(base_url, api_key, group_name, policy_name, srcintf, dstintf)
+
+
 def get_system_status(base_url: str, api_key: str) -> dict:
     """Return FortiGate system status from Monitor API when available."""
     payload = _json_request("GET", base_url, "/api/v2/monitor/system/status", api_key, timeout=8)
@@ -519,8 +537,11 @@ def block_ip(
     policy_name: str = DEFAULT_BLOCKLIST_POLICY,
     srcintf: str = "any",
     dstintf: str = "any",
+    object_prefix: str = "SPARK_BLOCK",
+    allow_partial_policy: bool = False,
+    action_label: str = "blocked",
 ) -> dict:
-    object_name = _object_name_for_ip(ip)
+    object_name = _object_name_for_ip(ip, object_prefix)
     evidence = {
         "ok": False,
         "status": "pending",
@@ -535,7 +556,7 @@ def block_ip(
         "policy_created": False,
         "api_responses": {},
         "message": "",
-        "enforcement_path": "FortiGate deny policy using SPARK_BLOCKLIST; runtime impact depends on traffic path.",
+        "enforcement_path": f"FortiGate deny/review policy using {group_name}; runtime impact depends on traffic path.",
     }
     timestamp = _utc_now()
     comment = " | ".join([
@@ -598,6 +619,15 @@ def block_ip(
             policy = ensure_block_policy(base_url, api_key, group_name, policy_name, srcintf, dstintf)
         except Exception as exc:
             status = _error_state(exc, "/api/v2/cmdb/firewall/policy")
+            if allow_partial_policy and (evidence.get("object_created_or_updated") and (evidence.get("group_updated") or evidence.get("already_member"))):
+                evidence.update({
+                    "ok": True,
+                    "status": "partial_success",
+                    "reason": "policy_limit_or_creation_failed",
+                    "message": status.get("error", "") or "FortiGate policy creation failed after object/group update.",
+                    "policy_present": False,
+                })
+                return evidence
             evidence.update({"status": "policy_create_failed", "message": status.get("error", "")})
             return evidence
         evidence["policy_present"] = bool(policy.get("present"))
@@ -607,8 +637,8 @@ def block_ip(
             evidence["api_responses"]["policy"] = policy["response"]
 
         evidence["ok"] = True
-        evidence["status"] = "blocked"
-        evidence["message"] = "IP added to FortiGate blocklist and deny policy is present."
+        evidence["status"] = action_label
+        evidence["message"] = f"IP added to FortiGate {group_name} and policy is present."
         return evidence
     except Exception as exc:
         status = _error_state(exc, "/api/v2/cmdb/firewall/address")
@@ -616,8 +646,8 @@ def block_ip(
         return evidence
 
 
-def unblock_ip(base_url: str, api_key: str, ip: str, group_name: str = DEFAULT_BLOCKLIST_GROUP, delete_object: bool = True) -> dict:
-    object_name = _object_name_for_ip(ip)
+def unblock_ip(base_url: str, api_key: str, ip: str, group_name: str = DEFAULT_BLOCKLIST_GROUP, delete_object: bool = True, object_prefix: str = "SPARK_BLOCK") -> dict:
+    object_name = _object_name_for_ip(ip, object_prefix)
     evidence = {
         "ok": False,
         "status": "pending",
@@ -665,6 +695,47 @@ def unblock_ip(base_url: str, api_key: str, ip: str, group_name: str = DEFAULT_B
         return evidence
 
 
+def quarantine_ip(
+    base_url: str,
+    api_key: str,
+    ip: str,
+    reason: str,
+    source: str,
+    duration_minutes: int | None,
+    severity: str,
+    incident_id: str = "",
+    group_name: str = DEFAULT_QUARANTINE_GROUP,
+    policy_name: str = DEFAULT_QUARANTINE_POLICY,
+    srcintf: str = "any",
+    dstintf: str = "any",
+) -> dict:
+    return block_ip(
+        base_url,
+        api_key,
+        ip,
+        reason,
+        source,
+        duration_minutes,
+        severity,
+        incident_id,
+        group_name,
+        policy_name,
+        srcintf,
+        dstintf,
+        object_prefix="SPARK_QUARANTINE",
+        allow_partial_policy=True,
+        action_label="quarantined",
+    )
+
+
+def unquarantine_ip(base_url: str, api_key: str, ip: str, group_name: str = DEFAULT_QUARANTINE_GROUP, delete_object: bool = True) -> dict:
+    result = unblock_ip(base_url, api_key, ip, group_name, delete_object=delete_object, object_prefix="SPARK_QUARANTINE")
+    if result.get("ok"):
+        result["status"] = "unquarantined"
+        result["message"] = "IP removed from FortiGate quarantine list."
+    return result
+
+
 def delete_address_object(base_url: str, api_key: str, ip: str) -> str:
     """Delete a FortiGate address object for a blocked IP."""
     try:
@@ -700,6 +771,15 @@ def list_blocklist(base_url: str, api_key: str, group_name: str = DEFAULT_BLOCKL
             "status": "blocked",
         })
     return {"status": "success", "group_name": group_name, "items": items}
+
+
+def list_quarantine(base_url: str, api_key: str, group_name: str = DEFAULT_QUARANTINE_GROUP) -> dict:
+    result = list_blocklist(base_url, api_key, group_name)
+    result["status"] = "success"
+    result["group_name"] = group_name
+    for item in result.get("items", []):
+        item["status"] = "quarantined"
+    return result
 
 
 def _summarize_response(response: requests.Response) -> dict:

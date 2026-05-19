@@ -5,15 +5,16 @@ Todos os endpoints do dashboard agrupados num Blueprint Flask.
 """
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime, timezone
+import hashlib
 import ipaddress
 import json
 import time
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
 import config
 from backend import tickets as ticket_store
-from backend import fortigate, fortianalyzer, wazuh, ai_proxy, shuffle, jira
+from backend import fortigate, fortianalyzer, ml_scoring, response_engine, wazuh, ai_proxy, shuffle, jira
 
 spark_bp = Blueprint("spark", __name__)
 
@@ -62,11 +63,94 @@ def _block_config() -> dict:
     }
 
 
+def _quarantine_config() -> dict:
+    return {
+        "group_name": getattr(config, "FORTIGATE_QUARANTINE_GROUP", "SPARK_QUARANTINE_LIST"),
+        "policy_name": getattr(config, "FORTIGATE_QUARANTINE_POLICY", "SPARK_QUARANTINE_REVIEW"),
+        "srcintf": getattr(config, "FORTIGATE_QUARANTINE_SRCINTF", getattr(config, "FORTIGATE_BLOCK_SRCINTF", "any")),
+        "dstintf": getattr(config, "FORTIGATE_QUARANTINE_DSTINTF", getattr(config, "FORTIGATE_BLOCK_DSTINTF", "any")),
+    }
+
+
 def _fortianalyzer_config() -> tuple[str, str]:
     return (
         getattr(config, "FORTIANALYZER_BASE_URL", "") or "",
         getattr(config, "FORTIANALYZER_API_KEY", "") or "",
     )
+
+
+def _payload_hash(payload: dict) -> str:
+    blob = json.dumps(payload or {}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _dashboard_link() -> str:
+    return getattr(config, "SPARK_DASHBOARD_URL", "") or getattr(config, "DASHBOARD_URL", "") or ""
+
+
+def _notification_webhook() -> str:
+    return getattr(config, "SHUFFLE_NOTIFICATION_WEBHOOK_URL", "") or getattr(config, "SHUFFLE_INCIDENT_WEBHOOK_URL", "")
+
+
+def _fortianalyzer_evidence_for_score(ip: str, limit: int = 10) -> dict:
+    if not ip:
+        return {
+            "configured": False,
+            "connected": False,
+            "source": "fortianalyzer",
+            "evidence_status": "not_queried",
+            "log_count": 0,
+            "items": [],
+            "references": [],
+            "message": "No source IP was available for FortiAnalyzer evidence lookup.",
+        }
+    try:
+        base_url, api_key = _fortianalyzer_config()
+        return fortianalyzer.get_evidence_for_ip(base_url, api_key, ip, limit=limit)
+    except Exception as exc:
+        return {
+            "configured": False,
+            "connected": False,
+            "source": "fortianalyzer",
+            "evidence_status": "evidence_pending",
+            "log_count": 0,
+            "items": [],
+            "references": [],
+            "message": "FortiAnalyzer evidence lookup is pending analyst review.",
+            "error": str(exc),
+        }
+
+
+def _with_fortianalyzer_evidence(payload: dict, force: bool = False) -> dict:
+    data = dict(payload or {})
+    raw = data.get("incident") or data.get("case") or data.get("alert") or data
+    if not isinstance(raw, dict):
+        return data
+    if raw.get("fortianalyzer") or raw.get("fortianalyzer_evidence"):
+        return data
+    should_query = force or bool(data.get("include_fortianalyzer") or data.get("enrich_fortianalyzer"))
+    if not should_query:
+        return data
+    ip = raw.get("source_ip") or raw.get("src_ip") or raw.get("ip") or raw.get("indicator") or ""
+    enriched = dict(raw)
+    enriched["fortianalyzer"] = _fortianalyzer_evidence_for_score(ip)
+    if data.get("incident") is raw:
+        data["incident"] = enriched
+    elif data.get("case") is raw:
+        data["case"] = enriched
+    elif data.get("alert") is raw:
+        data["alert"] = enriched
+    else:
+        data = enriched
+    return data
+
+
+def _score_and_persist_safe(payload: dict) -> dict:
+    try:
+        score = ml_scoring.score_incident(payload)
+        return ml_scoring.persist_score(score)
+    except Exception as exc:
+        return {"status": "ml_score_failed", "error": str(exc), "model_type": "deterministic_scoring_v1"}
 
 
 def _record_fortigate_evidence(action: str, status: str, payload: dict, case_id: str = "", ticket_id: str = "") -> dict:
@@ -1307,6 +1391,34 @@ def fortigate_block_ip():
     )
     if fg_result.get("ok"):
         ticket_store.block_ip(ip, "", reason, source)
+        evidence_id = event.get("id") or event.get("created_at", "")
+        ml_score = {"status": "not_scored", "model_type": "deterministic_scoring_v1"}
+        try:
+            fa_evidence = _fortianalyzer_evidence_for_score(ip)
+            ml_payload = {
+                "incident": {
+                    **data,
+                    **evidence_payload,
+                    "source_ip": ip,
+                    "incident_id": incident_id,
+                    "action_taken": "fortigate_block_ip",
+                    "action_success": True,
+                    "containment_status": "blocked",
+                    "evidence_id": evidence_id,
+                    "fortianalyzer": fa_evidence,
+                }
+            }
+            ml_score = _score_and_persist_safe(ml_payload)
+            evidence_payload["fortianalyzer"] = fa_evidence
+            evidence_payload["ml_risk"] = {
+                "risk_score": ml_score.get("risk_score"),
+                "risk_band": ml_score.get("risk_band"),
+                "recommended_action": ml_score.get("recommended_action"),
+                "confidence": ml_score.get("confidence"),
+                "model_type": ml_score.get("model_type", "deterministic_scoring_v1"),
+            }
+        except Exception as exc:
+            ml_score = {"status": "ml_score_failed", "error": str(exc), "model_type": "deterministic_scoring_v1"}
         return jsonify({
             "status": "blocked",
             "ip": ip,
@@ -1314,7 +1426,8 @@ def fortigate_block_ip():
             "object_name": fg_result.get("object", ""),
             "group_name": block_cfg["group_name"],
             "policy_name": block_cfg["policy_name"],
-            "evidence_id": event.get("id") or event.get("created_at", ""),
+            "evidence_id": evidence_id,
+            "ml_risk": ml_score,
             "fortigate": {
                 "object_created_or_updated": bool(fg_result.get("object_created_or_updated")),
                 "group_updated": bool(fg_result.get("group_updated") or fg_result.get("already_member")),
@@ -1441,6 +1554,180 @@ def fortigate_blocklist():
         item["incident_id"] = payload.get("incident_id", "")
         item["evidence_status"] = event.get("status", "")
     return jsonify(fg_result)
+
+
+def _decorate_list_with_events(fg_result: dict) -> dict:
+    events = ticket_store.list_action_events(limit=500)
+    latest_by_ip = {}
+    for event in events:
+        payload = event.get("payload", {})
+        ip = payload.get("ip") or event.get("ip")
+        if ip and ip not in latest_by_ip:
+            latest_by_ip[ip] = event
+    for item in fg_result.get("items", []):
+        event = latest_by_ip.get(item.get("ip"), {})
+        payload = event.get("payload", {}) if event else {}
+        item["reason"] = payload.get("reason") or item.get("reason", "")
+        item["created_at"] = event.get("created_at", "")
+        item["source"] = payload.get("source", "")
+        item["severity"] = payload.get("severity", "")
+        item["incident_id"] = payload.get("incident_id", "")
+        item["evidence_status"] = event.get("status", "")
+    return fg_result
+
+
+@spark_bp.route("/spark/fortigate/quarantine-ip", methods=["POST"])
+def fortigate_quarantine_ip():
+    data = request.get_json() or {}
+    ip, error = _validate_block_ip(data.get("ip", ""))
+    if error:
+        payload, status_code = error
+        return jsonify(payload), status_code
+    reason = (data.get("reason") or "").strip()
+    if len(reason) < 10:
+        return jsonify({"status": "invalid_reason", "message": "Analyst reason must have at least 10 characters.", "ip": ip}), 400
+
+    quarantine_cfg = _quarantine_config()
+    incident_id = (data.get("incident_id") or data.get("case_id") or data.get("caseId") or "").strip()
+    ticket_id = (data.get("ticket_id") or data.get("ticketId") or "").strip()
+    severity = (data.get("severity") or "medium").strip().lower()
+    source = (data.get("source") or "manual").strip().lower()
+    try:
+        duration_minutes = int(data.get("duration_minutes", 60))
+    except (TypeError, ValueError):
+        duration_minutes = 60
+
+    fg_result = fortigate.quarantine_ip(
+        config.FORTIGATE_BASE_URL,
+        config.FORTIGATE_API_KEY,
+        ip,
+        reason,
+        source,
+        duration_minutes,
+        severity,
+        incident_id,
+        quarantine_cfg["group_name"],
+        quarantine_cfg["policy_name"],
+        quarantine_cfg["srcintf"],
+        quarantine_cfg["dstintf"],
+    )
+
+
+@spark_bp.route("/spark/ml/status")
+def ml_status():
+    try:
+        return jsonify(ml_scoring.get_status())
+    except Exception as exc:
+        return jsonify({"ready": False, "engine": "deterministic_scoring_v1", "model_type": "deterministic", "trained_model": False, "tables_ready": False, "event_count": 0, "score_count": 0, "status": "unavailable", "message": str(exc)})
+
+
+@spark_bp.route("/spark/ml/score-incident", methods=["POST"])
+def ml_score_incident():
+    payload = request.get_json() or {}
+    payload = _with_fortianalyzer_evidence(payload, force=bool(payload.get("include_fortianalyzer")))
+    score = ml_scoring.score_incident(payload)
+    persisted = ml_scoring.persist_score(score)
+    return jsonify(persisted), 201
+
+
+@spark_bp.route("/spark/ml/insights")
+def ml_insights():
+    try:
+        limit = min(100, max(1, int(request.args.get("limit", 25) or 25)))
+    except (TypeError, ValueError):
+        limit = 25
+    data = ml_scoring.get_insights(limit=limit)
+    try:
+        recent_cases = ticket_store.list_incident_cases(limit=10, include_closed=False, sort="recent")
+        data["live_candidates"] = [ml_scoring.score_incident({"case": case}) for case in recent_cases[:5]]
+    except Exception:
+        data["live_candidates"] = []
+    return jsonify(data)
+
+
+@spark_bp.route("/spark/ml/export")
+def ml_export():
+    fmt = (request.args.get("format") or "json").lower()
+    if fmt not in {"json", "csv"}:
+        return jsonify({"error": "format must be json or csv"}), 400
+    body, mimetype = ml_scoring.export_dataset(fmt)
+    extension = "csv" if fmt == "csv" else "json"
+    return Response(body, mimetype=mimetype, headers={"Content-Disposition": f"attachment; filename=spark-ml-dataset.{extension}"})
+    evidence_payload = {
+        **fg_result,
+        "action": "quarantine",
+        "reason": reason,
+        "source": source,
+        "severity": severity,
+        "incident_id": incident_id,
+        "duration_minutes": duration_minutes,
+        "fortigate_object": fg_result.get("object", ""),
+        "fortigate_group": quarantine_cfg["group_name"],
+        "fortigate_policy": quarantine_cfg["policy_name"],
+        "api_responses": fg_result.get("api_responses", {}),
+    }
+    event = _record_fortigate_evidence(
+        "fortigate_quarantine_ip",
+        "success" if fg_result.get("ok") else "failed",
+        evidence_payload,
+        case_id=incident_id,
+        ticket_id=ticket_id,
+    )
+    status_code = 200 if fg_result.get("ok") else 502
+    if fg_result.get("status") in {"not_configured", "fortigate_offline"}:
+        status_code = 503
+    elif fg_result.get("status") == "auth_failed":
+        status_code = 401
+    return jsonify({
+        "status": fg_result.get("status", "quarantine_failed"),
+        "ip": ip,
+        "reason": reason,
+        "object_name": fg_result.get("object", ""),
+        "group_name": quarantine_cfg["group_name"],
+        "policy_name": quarantine_cfg["policy_name"],
+        "evidence_id": event.get("id") or event.get("created_at", ""),
+        "fortigate": {
+            "object_created_or_updated": bool(fg_result.get("object_created_or_updated")),
+            "group_updated": bool(fg_result.get("group_updated") or fg_result.get("already_member")),
+            "policy_present": bool(fg_result.get("policy_present")),
+            "policy_created": bool(fg_result.get("policy_created")),
+            "reason": fg_result.get("reason", ""),
+        },
+        "message": fg_result.get("message", ""),
+        "evidence": event,
+    }), status_code
+
+
+@spark_bp.route("/spark/fortigate/unquarantine-ip", methods=["POST"])
+def fortigate_unquarantine_ip():
+    data = request.get_json() or {}
+    ip, error = _validate_block_ip(data.get("ip", ""))
+    if error:
+        payload, status_code = error
+        return jsonify(payload), status_code
+    reason = (data.get("reason") or "").strip()
+    if len(reason) < 10:
+        return jsonify({"status": "invalid_reason", "message": "Analyst reason must have at least 10 characters.", "ip": ip}), 400
+    quarantine_cfg = _quarantine_config()
+    incident_id = (data.get("incident_id") or data.get("case_id") or data.get("caseId") or "").strip()
+    fg_result = fortigate.unquarantine_ip(config.FORTIGATE_BASE_URL, config.FORTIGATE_API_KEY, ip, quarantine_cfg["group_name"], delete_object=True)
+    event = _record_fortigate_evidence(
+        "fortigate_unquarantine_ip",
+        "success" if fg_result.get("ok") else "failed",
+        {**fg_result, "action": "unquarantine", "reason": reason, "incident_id": incident_id, "fortigate_group": quarantine_cfg["group_name"], "fortigate_policy": quarantine_cfg["policy_name"]},
+        case_id=incident_id,
+    )
+    return jsonify({"status": fg_result.get("status", "unquarantine_failed"), "ip": ip, "reason": reason, "object_name": fg_result.get("object", ""), "group_name": quarantine_cfg["group_name"], "policy_name": quarantine_cfg["policy_name"], "evidence_id": event.get("id"), "fortigate": fg_result, "evidence": event}), 200 if fg_result.get("ok") else 502
+
+
+@spark_bp.route("/spark/fortigate/quarantine-list")
+def fortigate_quarantine_list():
+    quarantine_cfg = _quarantine_config()
+    try:
+        fg_result = fortigate.list_quarantine(config.FORTIGATE_BASE_URL, config.FORTIGATE_API_KEY, quarantine_cfg["group_name"])
+    except Exception as exc:
+        return jsonify({"status": "endpoint_error", "message": str(exc), "items": []}), 502
+    return jsonify(_decorate_list_with_events(fg_result))
 
 
 @spark_bp.route("/spark/block-ip", methods=["POST"])
@@ -1591,6 +1878,151 @@ def action_events():
     case_id = request.args.get("case_id", "")
     ticket_id = request.args.get("ticket_id", "")
     return jsonify(ticket_store.list_action_events(limit=limit, case_id=case_id, ticket_id=ticket_id))
+
+
+def _local_ioc_enrichment(source_ip: str, incident_id: str = "") -> dict:
+    source_ip = (source_ip or "").strip()
+    try:
+        parsed = ipaddress.ip_address(source_ip)
+        private_ip = parsed.is_private
+    except ValueError:
+        parsed = None
+        private_ip = False
+    events = ticket_store.list_action_events(limit=1000)
+    repeated = previous_blocks = previous_quarantine = 0
+    for event in events:
+        payload = event.get("payload", {})
+        if (payload.get("ip") or event.get("ip")) != source_ip:
+            continue
+        repeated += 1
+        action = str(event.get("action") or payload.get("action") or "").lower()
+        previous_blocks += 1 if "block" in action else 0
+        previous_quarantine += 1 if "quarantine" in action else 0
+    allowlist = {item.strip() for item in str(getattr(config, "SPARK_ALLOWLIST_IPS", "")).split(",") if item.strip()}
+    allowlisted = source_ip in allowlist
+    if allowlisted or source_ip in PROTECTED_BLOCK_IPS or (parsed and (parsed.is_loopback or parsed.is_unspecified)):
+        recommended = "monitor"
+    elif previous_blocks or repeated >= 3:
+        recommended = "block"
+    elif previous_quarantine or repeated:
+        recommended = "quarantine"
+    else:
+        recommended = "monitor"
+    return {
+        "source_ip": source_ip,
+        "incident_id": incident_id,
+        "private_ip": private_ip,
+        "repeated_source_count": repeated,
+        "previously_blocked": previous_blocks > 0,
+        "previous_blocks": previous_blocks,
+        "previously_quarantined": previous_quarantine > 0,
+        "allowlisted": allowlisted,
+        "recommended_action": recommended,
+        "enrichment_source": "local",
+        "external_enrichment_ready": bool(getattr(config, "ABUSEIPDB_API_KEY", "") or getattr(config, "OTX_API_KEY", "")),
+        "external": {},
+    }
+
+
+def _soar_dispatch(payload: dict, workflow: str = "", webhook_url: str = "") -> tuple[dict, dict]:
+    workflow = workflow or getattr(config, "SHUFFLE_INCIDENT_WORKFLOW", "SPARK - Incident Response Evidence")
+    webhook_url = webhook_url or getattr(config, "SHUFFLE_INCIDENT_WEBHOOK_URL", "")
+    payload_hash = _payload_hash(payload)
+    evidence_id = payload.get("evidence_id") or f"EVD-SOAR-{int(time.time())}"
+    if not webhook_url:
+        result = {"ok": False, "status": "connector_ready", "dispatch_status": "connector_ready", "workflow": workflow, "webhook_called": False, "payload_hash": payload_hash, "evidence_id": evidence_id, "message": "Shuffle evidence webhook is ready for configuration."}
+    else:
+        result = shuffle.dispatch_incident_evidence(webhook_url, workflow, {**payload, "workflow": workflow, "payload_hash": payload_hash})
+        response = result.get("response") if isinstance(result.get("response"), dict) else {}
+        result.update({"dispatch_status": "sent" if result.get("ok") else "failed", "payload_hash": payload_hash, "evidence_id": evidence_id, "execution_id": response.get("execution_id") or response.get("id") or response.get("execution") or ""})
+    event = ticket_store.record_action_event(
+        case_id=payload.get("incident_id", ""),
+        action="shuffle_soar_dispatch",
+        status="success" if result.get("ok") else result.get("status", "connector_ready"),
+        payload={"action": "shuffle_soar_dispatch", "workflow_name": workflow, "execution_id": result.get("execution_id", ""), "dispatch_status": result.get("dispatch_status") or result.get("status"), "payload_hash": payload_hash, "evidence_id": evidence_id, "ip": payload.get("source_ip", ""), "message": result.get("message", "")},
+    )
+    return result, event
+
+
+@spark_bp.route("/spark/soar/status")
+def soar_status():
+    status = shuffle.get_status(config.SHUFFLE_BASE_URL, config.SHUFFLE_API_KEY, getattr(config, "SHUFFLE_BACKEND_URL", ""))
+    status["evidence_webhook_configured"] = bool(getattr(config, "SHUFFLE_INCIDENT_WEBHOOK_URL", ""))
+    status["notification_webhook_configured"] = bool(_notification_webhook())
+    return jsonify(status)
+
+
+@spark_bp.route("/spark/soar/dispatch-evidence", methods=["POST"])
+def soar_dispatch_evidence():
+    try:
+        result, event = _soar_dispatch(request.get_json() or {})
+        return jsonify({**result, "action_log_id": event.get("id"), "action_log": event})
+    except Exception as exc:
+        return jsonify({"status": "failed", "message": "SOAR evidence dispatch unavailable.", "error": f"{type(exc).__name__}: {exc}"}), 200
+
+
+@spark_bp.route("/spark/soar/notify-analyst", methods=["POST"])
+def soar_notify_analyst():
+    data = request.get_json() or {}
+    notification = {"type": "analyst_notification", "title": data.get("title") or "SPARK SOC incident requires analyst review", "severity": data.get("severity", "requires review"), "source_ip": data.get("source_ip", ""), "target": data.get("target", ""), "recommended_action": data.get("recommended_action", "monitor"), "risk_score": data.get("risk_score", ""), "evidence_id": data.get("evidence_id", ""), "dashboard_link": _dashboard_link(), "message": f"{data.get('severity', 'Review').upper()} - {data.get('title', 'Incident')} | Source {data.get('source_ip', '--')} | Action {data.get('recommended_action', 'monitor')} | Evidence {data.get('evidence_id', '--')}"}
+    try:
+        result, event = _soar_dispatch(notification, workflow="SPARK - Notify Analyst", webhook_url=_notification_webhook())
+        status = "sent" if result.get("ok") else result.get("status", "connector_ready")
+        return jsonify({**result, "status": status, "notification": notification, "action_log_id": event.get("id")})
+    except Exception as exc:
+        return jsonify({"status": "failed", "message": "Analyst notification unavailable.", "error": f"{type(exc).__name__}: {exc}"}), 200
+
+
+@spark_bp.route("/spark/soar/enrich-ioc", methods=["POST"])
+def soar_enrich_ioc():
+    data = request.get_json() or {}
+    return jsonify(_local_ioc_enrichment(data.get("source_ip", ""), data.get("incident_id", "")))
+
+
+@spark_bp.route("/spark/response/recommendation", methods=["GET", "POST"])
+def response_recommendation():
+    data = request.get_json(silent=True) or request.args.to_dict()
+    source_ip = data.get("source_ip", "")
+    enrichment = _local_ioc_enrichment(source_ip, data.get("incident_id", "")) if source_ip else {}
+    recommendation = response_engine.recommend({**data, **enrichment})
+    return jsonify({"status": "success", "recommendation": recommendation, "enrichment": enrichment})
+
+
+@spark_bp.route("/spark/response/execute", methods=["POST"])
+def response_execute():
+    data = request.get_json() or {}
+    action = (data.get("recommended_action") or data.get("action") or "").strip().lower()
+    ip = (data.get("source_ip") or data.get("ip") or "").strip()
+    reason = (data.get("analyst_reason") or data.get("reason") or "").strip()
+    if action not in {"monitor", "quarantine", "block"}:
+        return jsonify({"status": "invalid_action", "message": "Action must be monitor, quarantine or block."}), 400
+    if data.get("approval_confirmed") is not True:
+        return jsonify({"status": "approval_required", "message": "Analyst approval is required before execution."}), 400
+    if len(reason) < 10:
+        return jsonify({"status": "invalid_reason", "message": "Analyst reason must have at least 10 characters."}), 400
+    if action in {"quarantine", "block"}:
+        valid_ip, error = _validate_block_ip(ip)
+        if error:
+            payload, status_code = error
+            return jsonify(payload), status_code
+        ip = valid_ip
+    incident_id = data.get("incident_id", "")
+    enrichment = _local_ioc_enrichment(ip, incident_id) if ip else {}
+    recommendation = response_engine.recommend({**data, **enrichment, "source_ip": ip})
+    fortigate_result = {"status": "not_required", "message": "Monitor action recorded; no FortiGate change executed.", "ok": True}
+    if action == "quarantine":
+        q_cfg = _quarantine_config()
+        fortigate_result = fortigate.quarantine_ip(config.FORTIGATE_BASE_URL, config.FORTIGATE_API_KEY, ip, reason, "manual", int(data.get("duration_minutes") or 60), data.get("severity", "medium"), incident_id, q_cfg["group_name"], q_cfg["policy_name"], q_cfg["srcintf"], q_cfg["dstintf"])
+    elif action == "block":
+        b_cfg = _block_config()
+        fortigate_result = fortigate.block_ip(config.FORTIGATE_BASE_URL, config.FORTIGATE_API_KEY, ip, reason, "manual", int(data.get("duration_minutes") or 60), data.get("severity", "high"), incident_id, b_cfg["group_name"], b_cfg["policy_name"], b_cfg["srcintf"], b_cfg["dstintf"])
+    fortianalyzer_result = fortianalyzer.get_evidence_for_ip(*_fortianalyzer_config(), ip, limit=10) if ip else {"status": "no_ip", "log_count": 0, "references": []}
+    ml_score = _score_and_persist_safe({"incident": {**data, "source_ip": ip, "incident_id": incident_id, "action_taken": action, "action_success": bool(fortigate_result.get("ok")), "containment_status": fortigate_result.get("status", action), "fortigate_object": fortigate_result.get("object", ""), "fortigate_group": fortigate_result.get("group", ""), "fortigate_policy": fortigate_result.get("policy", ""), "fortianalyzer": fortianalyzer_result}})
+    event = ticket_store.record_action_event(case_id=incident_id, action=f"response_{action}", status="success" if fortigate_result.get("ok") else "failed", payload={**data, "action": f"response_{action}", "ip": ip, "reason": reason, "recommendation": recommendation, "fortigate": fortigate_result, "fortianalyzer": fortianalyzer_result, "automation_mode": "analyst_approved", "approval_confirmed": True})
+    evidence_id = event.get("id") or event.get("created_at", "")
+    soar_payload = {**data, "incident_id": incident_id, "source_ip": ip, "recommended_action": action, "action_taken": action, "fortigate_object": fortigate_result.get("object", ""), "fortigate_group": fortigate_result.get("group", ""), "fortigate_policy": fortigate_result.get("policy", ""), "fortianalyzer_status": fortianalyzer_result.get("status", ""), "fortianalyzer_log_count": fortianalyzer_result.get("log_count", 0), "evidence_id": evidence_id, "analyst_reason": reason, "risk_score": recommendation.get("risk_score"), "containment_confidence": data.get("containment_confidence", "")}
+    shuffle_result, shuffle_event = _soar_dispatch(soar_payload, workflow=recommendation.get("playbook", "SPARK - Analyst Approved Response"))
+    return jsonify({"status": "executed", "recommendation": recommendation, "ml_risk": ml_score, "fortigate_result": fortigate_result, "shuffle_result": shuffle_result, "fortianalyzer_result": fortianalyzer_result, "evidence_id": evidence_id, "action_log_id": event.get("id"), "shuffle_action_log_id": shuffle_event.get("id")})
 
 
 # ── Escalação ──────────────────────────────────────────────────────────────

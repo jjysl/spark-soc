@@ -314,17 +314,27 @@
     const [aiProvider, setAiProvider] = useState({provider: 'none', mode: 'deterministic_fallback'});
     const [evidenceHash, setEvidenceHash] = useState('');
     const [fortiAnalyzerEvidence, setFortiAnalyzerEvidence] = useState(null);
+    const [recommendation, setRecommendation] = useState(null);
+    const [responseAction, setResponseAction] = useState('monitor');
+    const [analystReason, setAnalystReason] = useState('');
+    const [approvalConfirmed, setApprovalConfirmed] = useState(false);
+    const [responseResult, setResponseResult] = useState(null);
+    const [soarResult, setSoarResult] = useState(null);
+    const [enrichmentResult, setEnrichmentResult] = useState(null);
+    const [mlInsights, setMlInsights] = useState(null);
     const toast = hooks.useToast ? hooks.useToast() : {pushToast: () => {}};
 
     async function load() {
       setLoading(true);
       try {
-        const [payload, fgBlocklist] = await Promise.all([
+        const [payload, fgBlocklist, mlPayload] = await Promise.all([
           api.incidents.getIncidentResponse(range),
           api.fortigate.getBlocklist().catch(err => ({items: [], status: 'error', message: err.message})),
+          api.ml?.getInsights ? api.ml.getInsights(30).catch(() => null) : Promise.resolve(null),
         ]);
         setData(payload);
         setBlocklist(fgBlocklist.items || []);
+        setMlInsights(mlPayload);
         setUpdatedAt(new Date());
         setError('');
       } catch (err) {
@@ -529,12 +539,13 @@
       return `Status: ${fortiAnalyzerStatusLabel(fa)} | Source IP searched: ${searchedIp} | Evidence status: Evidence pending | Log count: 0 | FortiAnalyzer evidence is not confirmed until log records are returned by the connector.`;
     }
 
-    function evidencePackSections(evidence, payload, candidate, faEvidence) {
+    function evidencePackSections(evidence, payload, candidate, faEvidence, mlScore) {
       const score = containmentScore(evidence);
       const sourceIp = evidence?.ip || caseIp(candidate) || '';
       return [
         ['Executive Summary', `${caseTitle(candidate)}. Severity ${candidate?.priority || candidate?.severity || '--'} with source ${caseIp(candidate) || evidence?.ip || '--'} targeting ${caseTarget(candidate)}.`],
         ['Technical Evidence', `Wazuh alerts: ${fmtNum(payload.wazuh?.total)}. Rule: ${candidate?.rule_id || '--'}. MITRE: ${caseMitre(candidate)}.`],
+        ['ML Risk Insights', mlScore ? `Score ${mlScore.risk_score}/100 (${mlScore.risk_band}) from ${mlScore.model_type || 'deterministic_scoring_v1'}. Recommended action: ${mlScore.recommended_action || 'requires analyst review'}.` : 'No persisted deterministic score is attached yet. Scores appear after analyst-approved response actions or manual scoring.'],
         ['Response Actions', `FortiGate object ${containmentObjectName(evidence) || '--'} added to ${containmentGroupName(evidence) || 'SPARK_BLOCKLIST'} with policy ${containmentPolicyName(evidence) || 'SPARK_AUTO_BLOCK'}.`],
         ['Containment Proof', `Evidence ID ${evidence?.evidence_id || '--'}. Containment confidence ${score}%. Status ${evidence?.status || 'Awaiting response evidence'}.`],
         ['Integrity', evidenceHash ? `SHA256:${evidenceHash}` : 'SHA256 pending evidence payload generation.'],
@@ -557,7 +568,7 @@
       return Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join('');
     }
 
-    async function buildEvidencePackPayload(evidence, payload, candidate, briefing, faEvidence) {
+    async function buildEvidencePackPayload(evidence, payload, candidate, briefing, faEvidence, mlScore) {
       const actions = Array.isArray(payload?.actions) ? payload.actions.slice(0, 12) : [];
       if (evidence) {
         actions.unshift({
@@ -592,8 +603,51 @@
         },
         containment_confidence: `${containmentChecks(evidence).filter(item => item.ok).length}/${containmentChecks(evidence).length}`,
         response_actions: actions.map(sanitizeOperationalObject),
+        recommendation: recommendation ? {
+          risk_score: recommendation.risk_score,
+          recommended_action: recommendation.recommended_action,
+          reasons: recommendation.reasons || [],
+          automation_mode: recommendation.automation_mode || 'analyst_approved',
+        } : {automation_mode: 'analyst_approved', recommended_action: 'not generated'},
+        analyst_decision: {
+          analyst_reason: analystReason || 'not available',
+          timestamp: responseResult?.generated_at || new Date().toISOString(),
+          approval_status: approvalConfirmed ? 'approved' : 'requires approval',
+        },
+        shuffle_soar: {
+          workflow_name: responseResult?.shuffle_result?.workflow || soarResult?.workflow || 'not available',
+          dispatch_status: responseResult?.shuffle_result?.dispatch_status || soarResult?.dispatch_status || soarResult?.status || 'not available',
+          execution_id: responseResult?.shuffle_result?.execution_id || soarResult?.execution_id || '',
+          payload_hash: responseResult?.shuffle_result?.payload_hash || soarResult?.payload_hash || '',
+        },
+        ml_candidate_features: {
+          severity: candidate?.priority || candidate?.severity || 'not available',
+          alert_count: payload?.wazuh?.total || evidence?.alert_count || 0,
+          mitre: caseMitre(candidate) || 'not available',
+          repeated_source_count: enrichmentResult?.repeated_source_count || 0,
+          previous_blocks: enrichmentResult?.previous_blocks || 0,
+          action_taken: responseResult?.status ? responseAction : 'not executed',
+          containment_success: Boolean(responseResult?.fortigate_result?.ok),
+          evidence_completeness_score: containmentChecks(evidence).filter(item => item.ok).length,
+          note: 'Candidate features only. No trained ML model claim.',
+        },
         ai_briefing_summary: briefing?.sections?.find(([title]) => title === 'Analysis')?.[1] || 'not available',
         compliance_evidence_refs: ['NIST CSF 2.0 Detect', 'NIST CSF 2.0 Respond', 'ISO 27001:2022 evidence review'],
+        ml_risk_insights: mlScore ? {
+          score: mlScore.risk_score,
+          band: mlScore.risk_band,
+          recommended_action: mlScore.recommended_action,
+          confidence: mlScore.confidence || 'not available',
+          explanation: mlScore.explanation || [],
+          features_used: mlScore.features || mlScore.features_used || {},
+          missing_fields: mlScore.missing_fields || [],
+          model_type: mlScore.model_type || 'deterministic_scoring_v1',
+          model_note: 'Deterministic scoring only. This is not a trained autonomous ML model.',
+        } : {
+          status: 'not_scored',
+          model_type: 'deterministic_scoring_v1',
+          model_note: 'No persisted score is attached to this incident yet.',
+        },
         fortianalyzer: {
           status: fortiAnalyzerStatusLabel(payload?.fortianalyzer),
           source_ip_searched: faEvidence?.ip || caseIp(candidate) || evidence?.ip || 'not available',
@@ -605,14 +659,14 @@
       };
     }
 
-    async function buildEvidencePackText(evidence, payload, candidate, briefing, faEvidence) {
-      const pack = await buildEvidencePackPayload(evidence, payload, candidate, briefing, faEvidence);
+    async function buildEvidencePackText(evidence, payload, candidate, briefing, faEvidence, mlScore) {
+      const pack = await buildEvidencePackPayload(evidence, payload, candidate, briefing, faEvidence, mlScore);
       const hash = await sha256Hex(stableStringify(pack));
       return `${JSON.stringify({...pack, integrity: {algorithm: 'SHA-256', hash}}, null, 2)}\n`;
     }
 
-    function EvidencePack({evidence, payload, candidate, fortiAnalyzerEvidence, onCopy, onExport, onCopyHash, hash}) {
-      const sections = evidencePackSections(evidence, payload, candidate, fortiAnalyzerEvidence);
+    function EvidencePack({evidence, payload, candidate, fortiAnalyzerEvidence, mlScore, onCopy, onExport, onCopyHash, hash}) {
+      const sections = evidencePackSections(evidence, payload, candidate, fortiAnalyzerEvidence, mlScore);
       return h('div', {className: 'card'},
         h('div', {className: 'ch'},
           h('div', null, h('div', {className: 'ct'}, 'Evidence Pack'), h('div', {className: 'cs'}, 'Audit-ready response summary for MDR handoff')),
@@ -714,15 +768,20 @@
     const cases = payload.cases || [];
     const counts = payload.wazuh?.counts || {};
     const briefingCandidate = candidates[0] || cases[0] || {};
+    const activeMlScore = (mlInsights?.latest_scores || mlInsights?.top_risks || []).find(score => {
+      const incidentId = briefingCandidate.case_id || briefingCandidate.caseId || briefingCandidate.id || briefingCandidate.document_id || lastEvidence?.incident_id || '';
+      const sourceIp = caseIp(briefingCandidate) || lastEvidence?.ip || '';
+      return (incidentId && score.incident_id === incidentId) || (sourceIp && (score.source_ip === sourceIp || score.event_id === sourceIp));
+    }) || (mlInsights?.top_risks || [])[0] || null;
 
     useEffect(() => {
       let active = true;
-      buildEvidencePackPayload(lastEvidence, payload, briefingCandidate, aiBriefing, fortiAnalyzerEvidence)
+      buildEvidencePackPayload(lastEvidence, payload, briefingCandidate, aiBriefing, fortiAnalyzerEvidence, activeMlScore)
         .then(pack => sha256Hex(stableStringify(pack)))
         .then(hash => { if (active) setEvidenceHash(hash); })
         .catch(() => { if (active) setEvidenceHash(''); });
       return () => { active = false; };
-    }, [lastEvidence, data, aiBriefing, fortiAnalyzerEvidence]);
+    }, [lastEvidence, data, aiBriefing, fortiAnalyzerEvidence, activeMlScore?.id, activeMlScore?.risk_score]);
 
     useEffect(() => {
       const fa = payload?.fortianalyzer || {};
@@ -1036,7 +1095,7 @@
 
     async function copyEvidencePack() {
       try {
-        const text = await buildEvidencePackText(lastEvidence, payload, briefingCandidate, aiBriefing, fortiAnalyzerEvidence);
+        const text = await buildEvidencePackText(lastEvidence, payload, briefingCandidate, aiBriefing, fortiAnalyzerEvidence, activeMlScore);
         await copyText(text);
         toast.pushToast({tone: 'success', title: 'Evidence Pack copied', message: 'Structured evidence is ready for handoff.'});
       } catch (err) {
@@ -1046,7 +1105,7 @@
 
     async function exportEvidencePack() {
       try {
-        const text = await buildEvidencePackText(lastEvidence, payload, briefingCandidate, aiBriefing, fortiAnalyzerEvidence);
+        const text = await buildEvidencePackText(lastEvidence, payload, briefingCandidate, aiBriefing, fortiAnalyzerEvidence, activeMlScore);
         const blob = new Blob([text], {type: 'application/json'});
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -1080,6 +1139,154 @@
       } catch (err) {
         toast.pushToast({tone: 'error', title: 'Briefing copy unavailable', message: err.message});
       }
+    }
+
+    function responsePayloadBase() {
+      const context = buildBriefingContext(Boolean(lastEvidence));
+      const incident = context.incident || briefingCandidate || {};
+      const evidence = context.evidence || lastEvidence || {};
+      return {
+        incident_id: incident.case_id || incident.caseId || incident.id || incident.document_id || evidence.incident_id || '',
+        title: caseTitle(incident),
+        severity: incident.priority || incident.severity || 'medium',
+        source_ip: caseIp(incident) || evidence.ip || '',
+        target: caseTarget(incident),
+        mitre: caseMitre(incident),
+        wazuh_rule: incident.rule_id || incident.wazuh_rule || evidence.wazuh_rule || '',
+        alert_count: incident.alert_count || evidence.alert_count || payload.wazuh?.total || 0,
+        fortianalyzer_status: payload.fortianalyzer?.status || '',
+        fortianalyzer_log_count: fortiAnalyzerEvidence?.log_count || 0,
+        containment_confidence: `${containmentChecks(lastEvidence).filter(item => item.ok).length}/${containmentChecks(lastEvidence).length}`,
+        repeated_source_count: enrichmentResult?.repeated_source_count || 0,
+        previous_blocks: enrichmentResult?.previous_blocks || 0,
+      };
+    }
+
+    async function enrichIoc() {
+      const base = responsePayloadBase();
+      if (!base.source_ip) {
+        toast.pushToast({tone: 'warn', title: 'IOC enrichment unavailable', message: 'No source IP is selected.'});
+        return;
+      }
+      setActionState('enrich:ioc');
+      try {
+        const result = await api.incidents.enrichIoc({source_ip: base.source_ip, incident_id: base.incident_id});
+        setEnrichmentResult(result);
+        toast.pushToast({tone: 'success', title: 'IOC enriched', message: `Recommended action: ${result.recommended_action}`});
+      } catch (err) {
+        toast.pushToast({tone: 'error', title: 'IOC enrichment failed', message: err.message});
+      } finally {
+        setActionState('');
+      }
+    }
+
+    async function generateRecommendation() {
+      const base = responsePayloadBase();
+      setActionState('recommendation');
+      try {
+        const result = await api.incidents.getRecommendation(base);
+        setRecommendation(result.recommendation);
+        setResponseAction(result.recommendation?.recommended_action || 'monitor');
+        setEnrichmentResult(result.enrichment || enrichmentResult);
+        toast.pushToast({tone: 'success', title: 'Recommendation generated', message: `${result.recommendation?.recommended_action || 'monitor'} | risk ${result.recommendation?.risk_score || 0}`});
+      } catch (err) {
+        toast.pushToast({tone: 'error', title: 'Recommendation failed', message: err.message});
+      } finally {
+        setActionState('');
+      }
+    }
+
+    async function executeRecommendedResponse() {
+      const base = responsePayloadBase();
+      if (analystReason.trim().length < 10 || !approvalConfirmed) {
+        toast.pushToast({tone: 'warn', title: 'Approval required', message: 'Confirm approval and enter an analyst reason with at least 10 characters.'});
+        return;
+      }
+      setActionState('execute:response');
+      try {
+        const result = await api.incidents.executeRecommendation({
+          ...base,
+          recommended_action: responseAction,
+          analyst_reason: analystReason,
+          approval_confirmed: approvalConfirmed,
+        });
+        setResponseResult(result);
+        if (responseAction !== 'monitor' && result.fortigate_result?.object) {
+          setLastEvidence(result.fortigate_result);
+        }
+        setSoarResult(result.shuffle_result || null);
+        toast.pushToast({tone: 'success', title: 'Response executed', message: `${responseAction} completed through analyst-approved automation.`});
+        await load();
+      } catch (err) {
+        toast.pushToast({tone: 'error', title: 'Response execution failed', message: err.message});
+      } finally {
+        setActionState('');
+      }
+    }
+
+    async function dispatchSoarEvidence() {
+      const base = responsePayloadBase();
+      setActionState('soar:dispatch');
+      try {
+        const result = await api.incidents.dispatchSoarEvidence({...base, recommended_action: responseAction, action_taken: responseAction, analyst_reason: analystReason, risk_score: recommendation?.risk_score || 0, evidence_id: responseResult?.evidence_id || lastEvidence?.evidence_id || ''});
+        setSoarResult(result);
+        toast.pushToast({tone: result.ok ? 'success' : 'warn', title: 'SOAR evidence dispatch', message: result.message || result.status});
+      } catch (err) {
+        toast.pushToast({tone: 'error', title: 'SOAR dispatch failed', message: err.message});
+      } finally {
+        setActionState('');
+      }
+    }
+
+    async function notifyAnalyst() {
+      const base = responsePayloadBase();
+      setActionState('soar:notify');
+      try {
+        const result = await api.incidents.notifyAnalyst({...base, recommended_action: responseAction, risk_score: recommendation?.risk_score || 0, evidence_id: responseResult?.evidence_id || lastEvidence?.evidence_id || ''});
+        setSoarResult(result);
+        toast.pushToast({tone: result.ok || result.status === 'sent' ? 'success' : 'warn', title: 'Analyst notification', message: result.message || result.status});
+      } catch (err) {
+        toast.pushToast({tone: 'error', title: 'Notification failed', message: err.message});
+      } finally {
+        setActionState('');
+      }
+    }
+
+    function RecommendedResponseCard() {
+      const reasons = recommendation?.reasons || [];
+      return h('div', {className: 'card'},
+        h('div', {className: 'ch'},
+          h('div', null,
+            h('div', {className: 'ct'}, 'Recommended Response'),
+            h('div', {className: 'cs'}, 'AI-assisted response with deterministic risk scoring and analyst-approved automation')
+          ),
+          h('span', {className: `badge ${responseAction === 'block' ? 'bcrit' : responseAction === 'quarantine' ? 'bwarn' : 'binfo'}`}, responseAction)
+        ),
+        h('div', {className: 'cb'},
+          h('div', {className: 'fgrid'},
+            h('div', {className: 'fstat'}, h('div', {className: 'fsl'}, 'Risk Score'), h('div', {className: 'fsv'}, recommendation ? recommendation.risk_score : '--'), h('div', {className: 'fss'}, recommendation?.confidence || 'Generate recommendation')),
+            h('div', {className: 'fstat'}, h('div', {className: 'fsl'}, 'Automation'), h('div', {className: 'fsv'}, 'Approved'), h('div', {className: 'fss'}, 'Analyst-in-the-loop')),
+            h('div', {className: 'fstat'}, h('div', {className: 'fsl'}, 'SOAR'), h('div', {className: 'fsv'}, soarResult?.dispatch_status || soarResult?.status || '--'), h('div', {className: 'fss'}, soarResult?.workflow || 'Shuffle evidence workflow')),
+            h('div', {className: 'fstat'}, h('div', {className: 'fsl'}, 'FortiAnalyzer'), h('div', {className: 'fsv'}, fortiAnalyzerEvidence?.evidence_status || payload.fortianalyzer?.status || '--'), h('div', {className: 'fss'}, `${fortiAnalyzerEvidence?.log_count || 0} logs`))
+          ),
+          reasons.length ? h('ul', {className: 'reason-list'}, reasons.map(reason => h('li', {key: reason}, reason))) : h('div', {className: 'empty-detail'}, 'Generate a recommendation to see the scoring rationale.'),
+          h('div', {className: 'form-stack', style: {marginTop: 12}},
+            h('label', null, 'Response action'),
+            h('select', {className: 'form-input', value: responseAction, onChange: event => setResponseAction(event.target.value)}, ['monitor', 'quarantine', 'block'].map(value => h('option', {key: value, value}, value[0].toUpperCase() + value.slice(1)))),
+            h('label', null, 'Analyst reason'),
+            h('textarea', {className: 'form-input', rows: 3, value: analystReason, onChange: event => setAnalystReason(event.target.value), placeholder: 'Document why this response is approved'}),
+            h('label', {className: 'checkline'}, h('input', {type: 'checkbox', checked: approvalConfirmed, onChange: event => setApprovalConfirmed(event.target.checked)}), ' Approval confirmed by analyst')
+          ),
+          responseResult ? h('div', {className: 'apirow'}, h('span', {className: 'adot ok'}), h('span', null, 'Last response'), h('span', {style: {marginLeft: 'auto'}}, `${responseResult.status} | evidence ${responseResult.evidence_id || '--'}`)) : null,
+          h('div', {className: 'row-actions', style: {marginTop: 12}},
+            h('button', {className: 'btn', onClick: enrichIoc, disabled: actionState === 'enrich:ioc'}, actionState === 'enrich:ioc' ? 'Enriching...' : 'Enrich IOC'),
+            h('button', {className: 'btn', onClick: generateRecommendation, disabled: actionState === 'recommendation'}, actionState === 'recommendation' ? 'Scoring...' : 'Generate Recommendation'),
+            h('button', {className: 'btn btnp', onClick: executeRecommendedResponse, disabled: actionState === 'execute:response'}, actionState === 'execute:response' ? 'Executing...' : 'Execute Recommended Response'),
+            h('button', {className: 'btn', onClick: dispatchSoarEvidence, disabled: actionState === 'soar:dispatch'}, 'Dispatch SOAR Evidence'),
+            h('button', {className: 'btn', onClick: notifyAnalyst, disabled: actionState === 'soar:notify'}, 'Notify Analyst')
+          )
+        )
+      );
     }
 
     const latestContainmentForUi = latestContainmentEvidence(false);
@@ -1255,6 +1462,7 @@
         h('strong', null, 'Incident Response: '),
         error ? `Integration unavailable in this environment. ${error}` : 'Showing Wazuh candidates with FortiGate blocklist response evidence. Containment is pending traffic-path validation.'
       ),
+      h(RecommendedResponseCard),
       h(SparkTrace, {payload, evidence: lastEvidence}),
       h(SparkTraceTimeline, {payload, evidence: lastEvidence, briefing: aiBriefing}),
       h('div', {className: 'source-strip'},
@@ -1264,7 +1472,7 @@
       ),
       h(components.LoadingState && loading && !data ? components.LoadingState : React.Fragment, loading && !data ? {title: 'Consulting Wazuh Indexer...', detail: 'Collecting incident candidates, cases and response evidence for this workspace.'} : null),
       h('div', {className: 'g11'},
-        h(EvidencePack, {evidence: lastEvidence, payload, candidate: briefingCandidate, fortiAnalyzerEvidence, onCopy: copyEvidencePack, onExport: exportEvidencePack, onCopyHash: copyEvidenceHash, hash: evidenceHash}),
+        h(EvidencePack, {evidence: lastEvidence, payload, candidate: briefingCandidate, fortiAnalyzerEvidence, mlScore: activeMlScore, onCopy: copyEvidencePack, onExport: exportEvidencePack, onCopyHash: copyEvidenceHash, hash: evidenceHash}),
         h(ContainmentConfidence, {evidence: lastEvidence})
       ),
       h(AiBriefingCard, {briefing: aiBriefing}),

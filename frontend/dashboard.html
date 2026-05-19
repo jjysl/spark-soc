@@ -461,6 +461,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
   <button class="tbtn" onclick="switchTab('threat',this)">Threat Detection</button>
   <button class="tbtn" onclick="switchTab('network',this)">Network &amp; Endpoint</button>
   <button class="tbtn" onclick="switchTab('ir',this)">Incident Response</button>
+  <button class="tbtn" onclick="switchTab('ml',this)">ML Risk Insights</button>
   <button class="tbtn" onclick="switchTab('compliance',this)">Compliance &amp; Risk</button>
   <button class="tbtn" onclick="switchTab('jira',this)">Cases &amp; Response</button>
 </nav>
@@ -536,7 +537,18 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
   </div>
 </div>
 
-<!-- ----------- TAB 5 — COMPLIANCE & RISK ----------- -->
+<!-- ----------- TAB 5 — ML RISK INSIGHTS ----------- -->
+<div class="panel" id="panel-ml">
+  <div id="ml-root">
+    <div class="ph">
+      <div><div class="ptitle">ML Risk Insights</div><div class="psub"><span class="ldot"></span>Loading deterministic scoring telemetry...</div></div>
+      <div class="ha"><button class="btn" disabled>Export JSON</button><button class="btn" disabled>Export CSV</button></div>
+    </div>
+    <div class="aibox loading"><strong>ML Risk Insights:</strong> No scored incidents yet. Scores will appear after analyst-approved response actions or manual scoring.</div>
+  </div>
+</div>
+
+<!-- ----------- TAB 6 — COMPLIANCE & RISK ----------- -->
 <div class="panel" id="panel-compliance">
   <div id="compliance-root">
     <div class="ph">
@@ -547,7 +559,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
   </div>
 </div>
 
-<!-- ----------- TAB 6 — JIRA TICKETS ----------- -->
+<!-- ----------- TAB 7 — JIRA TICKETS ----------- -->
 <div class="panel" id="panel-jira">
   <div id="tickets-root">
     <div class="ph">
@@ -577,6 +589,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
 <script src="/src/api/integrations.js"></script>
 <script src="/src/api/compliance.js"></script>
 <script src="/src/api/cases.js"></script>
+<script src="/src/api/ml.js"></script>
 <script src="/src/components/common/ToastProvider.js"></script>
 <script src="/src/hooks/useToast.js"></script>
 <script src="/src/hooks/useAsyncAction.js"></script>
@@ -601,6 +614,7 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var
 <script src="/src/pages/ThreatDetection.js"></script>
 <script src="/src/pages/NetworkEndpoint.js"></script>
 <script src="/src/pages/IncidentResponse.js"></script>
+<script src="/src/pages/MLRiskInsights.js"></script>
 <script src="/src/pages/ComplianceRisk.js"></script>
 <script src="/src/pages/Cases.js"></script>
 </body>

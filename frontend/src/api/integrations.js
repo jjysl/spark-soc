@@ -6,6 +6,7 @@
     getThreatDetection: params => client.get(`/spark/threat-detection?${params instanceof URLSearchParams ? params.toString() : String(params || '')}`),
     getNetworkEndpoint: () => client.get('/spark/network-endpoint'),
     getAiStatus: () => client.get('/spark/ai/status'),
+    getSoarStatus: () => client.get('/spark/soar/status'),
     getJiraStatus: () => client.get('/spark/jira/status'),
     getFortiAnalyzerStatus: () => client.get('/spark/fortianalyzer/status'),
     getFortiAnalyzerEvidence: (ip, limit = 10) => client.get(`/spark/fortianalyzer/evidence?ip=${encodeURIComponent(ip || '')}&limit=${encodeURIComponent(limit)}`),

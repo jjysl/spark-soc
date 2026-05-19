@@ -58,6 +58,9 @@ body[data-active-tab="ir"] .product-strip-steps span{padding:3px 7px;font-size:9
 .priority-queue-row .incident-title{font-weight:700;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .priority-queue-row .source-ip,.priority-queue-row .elapsed,.priority-queue-row .incident-id{color:var(--t2)}
 .fortianalyzer-card .apirow{gap:8px}
+.reason-list{margin:10px 0 0;padding-left:18px;color:var(--t2);font-size:12px;line-height:1.55}
+.reason-list li{margin:3px 0}
+.checkline{display:flex!important;align-items:center;gap:8px;color:var(--t2);font-size:12px}
 .product-hero{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,.8fr);gap:14px;margin-bottom:16px}
 .product-hero>div{background:#fff;border:1px solid var(--border);border-radius:var(--rl);box-shadow:var(--sh);padding:18px}
 .product-hero h2{font-size:26px;line-height:1.12;margin:10px 0 10px;color:var(--t1);letter-spacing:0}
