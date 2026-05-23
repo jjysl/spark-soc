@@ -4,19 +4,32 @@ SPARK SOC is a cloud NG-SOC / MDR workspace for detection, analyst-approved resp
 
 Public repository: https://github.com/jjysl/spark-soc
 
-## Challenge Deliverables
+## Challenge Deliverables / Entregáveis do Challenge
 
-This repository is organized to support the Fortinet/FIAP Challenge submission:
+Projeto acadêmico desenvolvido para o Challenge FIAP/Fortinet.  
+Academic project developed for the FIAP/Fortinet Challenge.
+
+This repository contains the required deliverables for the FIAP/Fortinet Challenge submission:
+
+- Public GitHub project link
+- Technical architecture of the solution
+- Implementation and reproduction guide
+- Final presentation source
+- Submission checklist
+
+Como o grupo avançou para a final com a Fortinet, os entregáveis de Vídeo Pitch e Vídeo Demonstração não se aplicam, conforme a orientação da atividade.
+
+Because the group advanced to the Fortinet final track, the Pitch Video and Demonstration Video deliverables are not applicable, according to the professor's submission instructions.
+
+Quick links:
 
 | Deliverable | Location |
 | --- | --- |
 | Public GitHub project link | https://github.com/jjysl/spark-soc |
-| Technical architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
-| Implementation and reproduction guide | [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) |
-| Final presentation source | [docs/presentation/SPARK_SOC_FINAL_DECK.md](docs/presentation/SPARK_SOC_FINAL_DECK.md) |
-| Submission checklist | [docs/DELIVERABLES.md](docs/DELIVERABLES.md) |
-
-The group is in the Fortinet final track, so the pitch and demo videos are not required according to the professor's note.
+| Technical Architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Implementation / Reproduction Guide | [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) |
+| Presentation | [docs/presentation/SPARK_SOC_FINAL_DECK.md](docs/presentation/SPARK_SOC_FINAL_DECK.md) |
+| Submission Checklist | [docs/DELIVERABLES.md](docs/DELIVERABLES.md) |
 
 The operational model is:
 
