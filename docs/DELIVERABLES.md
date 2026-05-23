@@ -10,8 +10,6 @@ This file maps the Fortinet/FIAP Challenge requirements to the repository conten
 | Technical architecture with integrations | [ARCHITECTURE.md](ARCHITECTURE.md) | Ready |
 | Implementation documentation and reproduction guide | [IMPLEMENTATION.md](IMPLEMENTATION.md) | Ready |
 | Final presentation deck | [presentation/SPARK_SOC_FINAL_DECK.md](presentation/SPARK_SOC_FINAL_DECK.md) | Ready as deck source |
-| 5-minute sales pitch video | Not required for Fortinet finalists, per professor note | Exempt |
-| 10-minute demo video | Not required for Fortinet finalists, per professor note | Exempt |
 
 ## Suggested Submission Format
 
