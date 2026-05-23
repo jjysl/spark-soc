@@ -2,6 +2,22 @@
 
 SPARK SOC is a cloud NG-SOC / MDR workspace for detection, analyst-approved response, SOAR orchestration and auditable evidence.
 
+Public repository: https://github.com/jjysl/spark-soc
+
+## Challenge Deliverables
+
+This repository is organized to support the Fortinet/FIAP Challenge submission:
+
+| Deliverable | Location |
+| --- | --- |
+| Public GitHub project link | https://github.com/jjysl/spark-soc |
+| Technical architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Implementation and reproduction guide | [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) |
+| Final presentation source | [docs/presentation/SPARK_SOC_FINAL_DECK.md](docs/presentation/SPARK_SOC_FINAL_DECK.md) |
+| Submission checklist | [docs/DELIVERABLES.md](docs/DELIVERABLES.md) |
+
+The group is in the Fortinet final track, so the pitch and demo videos are not required according to the professor's note.
+
 The operational model is:
 
 ```text
